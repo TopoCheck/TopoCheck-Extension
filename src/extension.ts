@@ -1,7 +1,24 @@
 import * as vscode from "vscode";
 import { validateConfiguration } from "./validation/configValidator";
 
+import { ModuleRegistry } from "./core/ModuleRegistry";
+import { TopologyModule } from "./modules/topology/TopologyModule";
+import { ConfigModule } from "./modules/config/ConfigModule";
+import { DiagnosticsModule } from "./modules/diagnostics/DiagnosticsModule";
+import { ExternalApiModule } from "./modules/external-api/ExternalApiModule";
+import { ExampleModule } from "./example-module/ExampleModule";
+
 export function activate(context: vscode.ExtensionContext): void {
+  const registry = new ModuleRegistry();
+
+  registry.register(new TopologyModule());
+  registry.register(new ConfigModule());
+  registry.register(new DiagnosticsModule());
+  registry.register(new ExternalApiModule());
+  registry.register(new ExampleModule());
+
+  registry.initializeAll();
+
   const diagnostics =
     vscode.languages.createDiagnosticCollection("topocheck");
 
