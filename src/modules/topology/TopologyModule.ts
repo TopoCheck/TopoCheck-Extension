@@ -5,19 +5,35 @@
  */
 
 import * as vscode from "vscode";
+import { IModule } from "../../core/interfaces/IModule";
 import { TopologyStore } from "./TopologyStore";
 
-export class TopologyModule implements vscode.Disposable {
-    readonly store: TopologyStore;
+export class TopologyModule implements IModule, vscode.Disposable {
+    readonly name = "topology";
+
+    private _store: TopologyStore | undefined;
     private readonly disposables: vscode.Disposable[] = [];
 
-    constructor(context: vscode.ExtensionContext) {
+    constructor(private readonly context: vscode.ExtensionContext) { }
+
+    //Öffentlicher Zugriff auf den Store für andere Module
+    get store(): TopologyStore {
+        if (!this._store) {
+            throw new Error(
+                "TopologyModule wurde noch nicht initialisiert – initialize() muss zuerst über die ModuleRegistry aufgerufen werden."
+            );
+        }
+        return this._store;
+    }
+
+    initialize(): void {
         const storageUri = vscode.Uri.joinPath(
-            context.globalStorageUri,
+            this.context.globalStorageUri,
             "topologies"
         );
-        this.store = new TopologyStore(storageUri);
-        this.disposables.push(this.store);
+        this._store = new TopologyStore(storageUri);
+        this.disposables.push(this._store);
+
         this.registerCommands();
     }
 
@@ -26,7 +42,7 @@ export class TopologyModule implements vscode.Disposable {
             "topocheck.topology.create",
             async () => {
                 const name = await vscode.window.showInputBox({
-                    prompt: "Name der neuen Topologie:",
+                    prompt: "Name der neuen Topologie",
                 });
                 if (!name) {
                     return;
@@ -38,8 +54,10 @@ export class TopologyModule implements vscode.Disposable {
                 );
             }
         );
+
         this.disposables.push(createCommand);
     }
+
     dispose(): void {
         for (const disposable of this.disposables) {
             disposable.dispose();
