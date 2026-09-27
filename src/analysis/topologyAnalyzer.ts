@@ -1,5 +1,4 @@
-import { NetworkInterface } from "../models/networkInterface";
-import { NetworkTopology } from "../models/networkTopology";
+import { NetworkInterface, NetworkTopology } from "../models";
 
 export enum TopologyIssueCode {
   DeviceWithoutInterface = "DEVICE_WITHOUT_INTERFACE",

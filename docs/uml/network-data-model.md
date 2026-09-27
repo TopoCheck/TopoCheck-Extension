@@ -1,7 +1,6 @@
 # UML-Klassendiagramm: Netzwerk-Datenmodell
 
-Dieses Diagramm ist der geplante Stand für Subziel H1.c. Nach der
-Implementierung muss es mit den tatsächlichen Klassen synchronisiert werden.
+Dieses Diagramm bildet den implementierten Stand von Subziel H1.c ab.
 
 ```mermaid
 classDiagram
@@ -43,8 +42,8 @@ classDiagram
         +string name
         +InterfaceType type
         +boolean enabled
-        +string ipAddress
-        +string subnetMask
+        +string? ipAddress
+        +string? subnetMask
         +setIpConfiguration(ipAddress, subnetMask) void
         +clearIpConfiguration() void
         +enable() void
@@ -65,6 +64,20 @@ classDiagram
         +ConnectionEndpoint target
         +usesDevice(deviceId) boolean
         +usesInterface(deviceId, interfaceId) boolean
+        +connectsSameEndpoints(other) boolean
+    }
+
+    class TopologyAnalyzer {
+        <<module>>
+        +analyzeTopology(topology) TopologyIssue[]
+    }
+
+    class TopologyIssue {
+        <<interface>>
+        +TopologyIssueCode code
+        +string message
+        +string? deviceId
+        +string? interfaceId
     }
 
     class ConnectionEndpoint {
@@ -112,6 +125,8 @@ classDiagram
     NetworkDevice --> DeviceType : has type
     NetworkInterface --> InterfaceType : has type
     NetworkProtocol --> ProtocolType : has type
+    TopologyAnalyzer ..> NetworkTopology : analyzes
+    TopologyAnalyzer ..> TopologyIssue : returns
 ```
 
 ## Beziehungserklärung
@@ -121,12 +136,13 @@ classDiagram
 - Eine Verbindung enthält genau zwei Endpunkte.
 - Ein Endpunkt verweist über IDs auf ein Gerät und eines seiner Interfaces.
 - Enums begrenzen Geräte-, Interface- und Protokolltypen auf bekannte Werte.
+- Der TopologyAnalyzer konsumiert das Modell und liefert strukturierte Issues.
 
 ## Konsistenzprüfung nach Implementierung
 
-- [ ] Alle dargestellten Klassen und Enums existieren im Code.
-- [ ] Namen und Typen der öffentlichen Eigenschaften stimmen überein.
-- [ ] Öffentliche Methoden stimmen mit der Implementierung überein.
-- [ ] Kardinalitäten entsprechen der tatsächlichen Modelllogik.
-- [ ] Änderungen aus dem Code-Review wurden im Diagramm nachgezogen.
+- [x] Alle dargestellten Klassen und Enums existieren im Code.
+- [x] Namen und Typen der öffentlichen Eigenschaften stimmen überein.
+- [x] Öffentliche Methoden stimmen mit der Implementierung überein.
+- [x] Kardinalitäten entsprechen der tatsächlichen Modelllogik.
+- [x] Der Branch-Diff wurde geprüft; dabei waren keine weiteren UML-Änderungen nötig.
 

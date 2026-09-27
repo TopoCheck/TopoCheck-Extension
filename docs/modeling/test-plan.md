@@ -145,11 +145,11 @@ Erwartetes Ergebnis:
 
 | Prüfung | Ergebnis | Nachweis/Link |
 |---|---|---|
-| TypeScript-Prüfung erfolgreich | Offen | CI-Ausgabe oder Screenshot |
-| ESLint erfolgreich | Offen | CI-Ausgabe oder Screenshot |
-| Alle Unit-Tests erfolgreich | Offen | CI-Ausgabe oder Screenshot |
-| Integrationsszenario erfolgreich | Offen | Testname/CI-Ausgabe |
-| UML mit Code abgeglichen | Offen | Review-Kommentar |
-| Nachgelagertes Modul verwendet Modell | Offen | `topologyAnalyzer.test.ts` |
+| TypeScript-Prüfung erfolgreich | Bestanden | `npm run check-types` |
+| ESLint erfolgreich | Bestanden | `npm run lint` |
+| Alle Unit-Tests erfolgreich | Bestanden | 38 Tests im VS-Code-Testlauf |
+| Integrationsszenario erfolgreich | Bestanden | `returns no issues for a valid topology consumed by the analyzer` |
+| UML mit Code abgeglichen | Bestanden | `docs/uml/network-data-model.md` |
+| Nachgelagertes Modul verwendet Modell | Bestanden | `topologyAnalyzer.test.ts` |
 | Pull Request reviewed | Offen | PR-Link |
 

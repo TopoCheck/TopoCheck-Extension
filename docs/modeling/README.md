@@ -187,14 +187,13 @@ Damit existiert ein echter, automatisch testbarer Konsument des Datenmodells.
 | Nachgelagertes Modul konsumiert Modell | `TopologyAnalyzer` und dessen Integrationstest |
 | UML stimmt mit Code überein | Abschlussprüfung im Pull Request |
 
-## Offene Entscheidungen vor Implementierungsbeginn
+## Getroffene Entscheidungen für die erste Version
 
-- Soll `hostname` innerhalb einer Topologie eindeutig sein oder nur die ID?
-- Werden Layer-3-Switches bereits in Sprint 1 berücksichtigt?
-- Darf ein Interface mehrere logische Verbindungen besitzen?
-- Sollen IPv6-Adressen bereits Teil des Basismodells sein?
-- Wird DHCP als Dienst, Protokoll oder eigene Konfiguration modelliert?
-
-Die Antworten werden in diesem Dokument festgehalten, bevor die betroffene
-Regel implementiert wird.
+- Geräte werden über ihre ID eindeutig identifiziert; Hostnamen müssen nicht
+  topologieweit eindeutig sein.
+- Layer-3-Switches werden in Sprint 1 nicht gesondert modelliert.
+- Ein Interface darf höchstens eine physische Verbindung besitzen.
+- Das Basismodell unterstützt zunächst IPv4, aber noch kein IPv6.
+- DHCP wird vorläufig über den gemeinsamen Protokolltyp abgebildet und kann
+  später in ein spezifisches Konfigurationsmodell ausgelagert werden.
 
