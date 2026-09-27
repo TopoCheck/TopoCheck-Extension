@@ -1,71 +1,116 @@
-# topocheck README
+# TopoCheck
 
-This is the README for your extension "topocheck". After writing up a brief description, we recommend including the following sections.
+TopoCheck ist eine Visual-Studio-Code-Extension zum Lernen und Prüfen von
+Netzwerkkonfigurationen. Cisco-Konfigurationsdateien mit den Endungen `.cfg`
+und `.ios` werden als eigener Dateityp erkannt und während der Bearbeitung
+validiert.
 
-## Features
+## Aktuelle Funktionen
 
-Describe specific features of your extension including screenshots of your extension in action. Image paths are relative to this README file.
+- Registrierung von `.cfg`- und `.ios`-Dateien als Sprache `topocheck`
+- Validierung beim Öffnen und Ändern einer Konfigurationsdatei
+- manueller Befehl `TopoCheck: Validate Current Configuration`
+- VS-Code-Diagnosen für ungültige oder unbekannte Befehle
+- internes Datenmodell für Geräte, Interfaces, Verbindungen und Protokolle
+- Topologieanalyse für fehlende Interfaces, unverbundene Geräte,
+  unvollständige IP-Konfigurationen und doppelte IPv4-Adressen
 
-For example if there is an image subfolder under your extension project workspace:
+Der aktuelle Konfigurationsvalidator ist bewusst ein einfacher Prototyp und
+noch kein vollständiger Cisco-IOS-Parser.
 
-\!\[feature X\]\(images/feature-x.png\)
+## Projektstruktur
 
-> Tip: Many popular extensions utilize animations. This is an excellent way to show off your extension! We recommend short, focused animations that are easy to follow.
+```text
+src/
+|-- extension.ts                 Aktivierung und VS-Code-Integration
+|-- validation/
+|   `-- configValidator.ts       Zeilenbasierte Konfigurationsprüfung
+|-- models/                      Internes Netzwerk-Datenmodell
+|-- analysis/
+|   `-- topologyAnalyzer.ts      Analyse von NetworkTopology-Objekten
+`-- test/                        Unit- und Integrationstests
 
-## Requirements
+docs/
+|-- modeling/                    Planung, Regeln und Testplan für H1.c
+`-- uml/
+    `-- network-data-model.md    UML-Klassendiagramm
+```
 
-If you have any requirements or dependencies, add a section describing those and how to install and configure them.
+## Internes Datenmodell
 
-## Extension Settings
+`NetworkTopology` ist der zentrale Einstiegspunkt des Modells. Eine Topologie
+enthält `NetworkDevice`- und `NetworkConnection`-Objekte. Geräte verwalten ihre
+`NetworkInterface`- und `NetworkProtocol`-Objekte.
 
-Include if your extension adds any VS Code settings through the `contributes.configuration` extension point.
+Das Modell stellt unter anderem folgende Regeln sicher:
 
-For example:
+- eindeutige Geräte-, Interface-, Protokoll- und Verbindungs-IDs
+- eindeutige Interface-Namen pro Gerät
+- nur unterstützte Protokolle je Gerätetyp
+- Verbindungen nur zwischen vorhandenen Geräten und Interfaces
+- maximal eine physische Verbindung pro Interface
+- automatisches Entfernen von Verbindungen beim Löschen eines Geräts
 
-This extension contributes the following settings:
+Das vollständige Klassendiagramm befindet sich unter
+[`docs/uml/network-data-model.md`](docs/uml/network-data-model.md).
 
-* `myExtension.enable`: Enable/disable this extension.
-* `myExtension.thing`: Set to `blah` to do something.
+## Topologieanalyse
 
-## Known Issues
+Der Analyzer arbeitet unabhängig von der VS-Code-API und nimmt echte
+`NetworkTopology`-Objekte entgegen:
 
-Calling out known issues can help limit users opening duplicate issues against your extension.
+```ts
+const issues = analyzeTopology(topology);
+```
 
-## Release Notes
+Er liefert strukturierte `TopologyIssue`-Objekte. Dadurch kann er später vom
+Parser, einem Konfigurationsgenerator oder der grafischen Oberfläche verwendet
+werden. Eine direkte Verbindung zwischen `.cfg`-Dateien und dem Analyzer wird
+erst mit dem geplanten Parser hergestellt.
 
-Users appreciate release notes as you update your extension.
+## Entwicklung
 
-### 1.0.0
+Voraussetzungen:
 
-Initial release of ...
+- Node.js und npm
+- Visual Studio Code
+- die in `.vscode/extensions.json` empfohlenen Erweiterungen
 
-### 1.0.1
+Abhängigkeiten installieren:
 
-Fixed issue #.
+```bash
+npm install
+```
 
-### 1.1.0
+Qualitätsprüfungen ausführen:
 
-Added features X, Y, and Z.
+```bash
+npm run check-types
+npm run lint
+npm test
+```
 
----
+Mit `F5` wird ein neues Fenster als Extension Development Host geöffnet. Dort
+können die Dateien unter `test-workspace/` zum manuellen Testen verwendet
+werden.
 
-## Following extension guidelines
+## Testdateien
 
-Ensure that you've read through the extensions guidelines and follow the best practices for creating your extension.
+- `test-workspace/valid-router.cfg` enthält eine gültige Beispielkonfiguration.
+- `test-workspace/invalid-router.cfg` enthält absichtlich einen fehlenden
+  Hostnamen, eine fehlende Subnetzmaske und einen unbekannten Befehl.
 
-* [Extension Guidelines](https://code.visualstudio.com/api/references/extension-guidelines)
+## Dokumentation
 
-## Working with Markdown
+- [Modellierungsplanung](docs/modeling/README.md)
+- [Implementierungsplan](docs/modeling/implementation-plan.md)
+- [Testplan](docs/modeling/test-plan.md)
+- [UML-Klassendiagramm](docs/uml/network-data-model.md)
 
-You can author your README using Visual Studio Code. Here are some useful editor keyboard shortcuts:
+## Bekannte Einschränkungen
 
-* Split the editor (`Cmd+\` on macOS or `Ctrl+\` on Windows and Linux).
-* Toggle preview (`Shift+Cmd+V` on macOS or `Shift+Ctrl+V` on Windows and Linux).
-* Press `Ctrl+Space` (Windows, Linux, macOS) to see a list of Markdown snippets.
-
-## For more information
-
-* [Visual Studio Code's Markdown Support](http://code.visualstudio.com/docs/languages/markdown)
-* [Markdown Syntax Reference](https://help.github.com/articles/markdown-basics/)
-
-**Enjoy!**
+- Der Konfigurationsvalidator unterstützt nur wenige grundlegende Befehle.
+- Das Datenmodell unterstützt derzeit IPv4, aber noch kein IPv6.
+- Der TopologieAnalyzer ist noch nicht mit dem `.cfg`-Parser oder der
+  VS-Code-Diagnoseanzeige verbunden.
+- Layer-3-Switches werden in der ersten Modellversion nicht gesondert behandelt.
