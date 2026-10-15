@@ -1,6 +1,6 @@
 /**
  * 
- * Kapselt die Zuständigketi: Datenmodell, Persistenz und Änderungserkennung für Topologien.
+ * Kapselt die Zuständigkeit: Datenmodell, Persistenz und Änderungserkennung für Topologien.
  * 
  */
 
