@@ -1,7 +1,28 @@
 import * as vscode from "vscode";
 import { validateConfiguration } from "./validation/configValidator";
 
+import { ModuleRegistry } from "./core/ModuleRegistry";
+import { TopologyModule } from "./modules/topology/TopologyModule";
+import { ConfigModule } from "./modules/config/ConfigModule";
+import { DiagnosticsModule } from "./modules/diagnostics/DiagnosticsModule";
+import { ExternalApiModule } from "./modules/external-api/ExternalApiModule";
+import { ExampleModule } from "./example-module/ExampleModule";
+
 export function activate(context: vscode.ExtensionContext): void {
+  const registry = new ModuleRegistry();
+
+  const topologyModule = new TopologyModule(context);
+
+  registry.register(topologyModule);
+  registry.register(new ConfigModule());
+  registry.register(new DiagnosticsModule());
+  registry.register(new ExternalApiModule());
+  registry.register(new ExampleModule());
+
+  registry.initializeAll();
+
+  context.subscriptions.push(topologyModule);
+
   const diagnostics =
     vscode.languages.createDiagnosticCollection("topocheck");
 
@@ -63,4 +84,4 @@ export function activate(context: vscode.ExtensionContext): void {
   );
 }
 
-export function deactivate(): void {}
+export function deactivate(): void { }
