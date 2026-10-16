@@ -4,9 +4,19 @@
  * 
  */
 
+import type { Point } from "../../shared/geometry";
+
 export type DeviceType = "router" | "switch" | "pc";
 export type InterfaceStatus = "up" | "down";
-export const CURRENT_SCHEMA_VERSION = 1;
+export const CURRENT_SCHEMA_VERSION = 2;
+export type Position = Point;
+
+/**
+ * Darstellungsdaten einer Topologie – bewusst getrennt vom Netzwerkmodell.
+ */
+export interface TopologyLayout {
+    devices: Record<string, Position>;
+}
 
 export interface Interface {
     id: string;
@@ -47,4 +57,5 @@ export interface Topology {
     updatedAt: string;
     devices: Device[];
     connections: Connection[];
+    layout: TopologyLayout;
 }
