@@ -158,22 +158,24 @@ body.dragging-new * {
 
 .device-frame {
     fill: transparent;
-    stroke: transparent;
-    stroke-width: 1.5;
+    stroke: none;
 }
 
-.device:hover .device-frame {
-    fill: var(--vscode-list-hoverBackground);
+.device:hover use {
+    filter: brightness(1.15);
 }
 
-.device.selected .device-frame {
-    fill: var(--vscode-list-inactiveSelectionBackground);
-    stroke: var(--vscode-focusBorder);
+.device.selected use {
+    filter: url(#selection-outline);
 }
 
-.device:focus-visible .device-frame {
-    stroke: var(--vscode-focusBorder);
-    stroke-dasharray: 3 2;
+.selection-outline-color {
+    flood-color: var(--vscode-focusBorder);
+}
+
+.device.selected .device-label {
+    fill: var(--vscode-focusBorder);
+    font-weight: 600;
 }
 
 .device.dragging {
@@ -185,6 +187,10 @@ body.dragging-new * {
     font-size: 12px;
     font-family: var(--vscode-font-family);
     pointer-events: none;
+    paint-order: stroke;
+    stroke: var(--vscode-editor-background);
+    stroke-width: 4px;
+    stroke-linejoin: round;
 }
 
 .ghost {
@@ -266,7 +272,7 @@ kbd {
     pointer-events: none;
 }
 
-.corner > * {
+.corner>* {
     pointer-events: auto;
 }
 

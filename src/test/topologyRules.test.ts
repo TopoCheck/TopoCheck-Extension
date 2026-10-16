@@ -1,9 +1,8 @@
 import * as assert from "assert";
 import { nextHostname, validateHostname } from "../modules/topology/hostname";
 import { migrateTopology, UnsupportedSchemaVersionError } from "../modules/topology/migrations";
-import { buildDemoPlan } from "../modules/topology/demo";
 
-suite("Topologie-Regeln (H2a)", () => {
+suite("Topologie-Regeln", () => {
     test("validateHostname prüft die IOS-Regeln", () => {
         for (const valid of ["R1", "Core-Router-1"]) {
             assert.strictEqual(validateHostname(valid), undefined, valid);
@@ -23,12 +22,5 @@ suite("Topologie-Regeln (H2a)", () => {
             () => migrateTopology({ schemaVersion: 99, devices: [], connections: [] }),
             UnsupportedSchemaVersionError
         );
-    });
-
-    test("Demo-Bauplan erzeugt genau n Geräte ohne Überlappung", () => {
-        const plan = buildDemoPlan(50);
-        assert.strictEqual(plan.devices.length, 50);
-        const positions = new Set(plan.devices.map((d) => `${d.position.x},${d.position.y}`));
-        assert.strictEqual(positions.size, 50);
     });
 });

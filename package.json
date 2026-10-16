@@ -51,11 +51,6 @@
         "icon": "$(type-hierarchy)"
       },
       {
-        "command": "topocheck.topology.createDemo",
-        "title": "Create Demo Topology (Performance Test)",
-        "category": "TopoCheck"
-      },
-      {
         "command": "topocheck.topologyView.renameDevice",
         "title": "Rename Device",
         "category": "TopoCheck"

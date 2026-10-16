@@ -1,15 +1,12 @@
 /**
  *
  * Kapselt die Zuständigketi: Datenmodell, Persistenz und Änderungserkennung für Topologien
- * sowie die interaktive Topologieansicht
  *
  */
 
 import * as vscode from "vscode";
 import { IModule } from "../../core/interfaces/IModule";
 import { TOPOLOGY_VIEW_TYPE, TopologyViewState } from "../../shared/protocol";
-import { buildDemoPlan, demoInterfaceName } from "./demo";
-import { Device } from "./models";
 import { TopologyStore } from "./TopologyStore";
 import { TopologyViewPanel } from "./view/TopologyViewPanel";
 
@@ -106,70 +103,7 @@ export class TopologyModule implements IModule, vscode.Disposable {
             }
         );
 
-        const demoCommand = vscode.commands.registerCommand(
-            "topocheck.topology.createDemo",
-            () => this.createDemoTopology()
-        );
-
-        this.disposables.push(createCommand, openCommand, demoCommand);
-    }
-
-    private async createDemoTopology(): Promise<void> {
-        const input = await vscode.window.showInputBox({
-            title: "TopoCheck: Demo-Topologie erzeugen",
-            prompt: "Anzahl der Geräte (1–500)",
-            value: "50",
-            validateInput: (value) => {
-                const count = Number(value);
-                return Number.isInteger(count) && count >= 1 && count <= 500
-                    ? undefined
-                    : "Bitte eine ganze Zahl zwischen 1 und 500 eingeben.";
-            },
-        });
-        if (!input) {
-            return;
-        }
-        const count = Number(input);
-        const plan = buildDemoPlan(count);
-
-        const topology = await vscode.window.withProgress(
-            {
-                location: vscode.ProgressLocation.Notification,
-                title: `Demo-Topologie mit ${count} Geräten wird erzeugt …`,
-            },
-            async () => {
-                const created = await this.store.createTopology(`Demo (${count} Geräte)`);
-                const devices: Device[] = [];
-                for (const planned of plan.devices) {
-                    devices.push(
-                        await this.store.addDevice(created.id, {
-                            type: planned.type,
-                            position: planned.position,
-                        })
-                    );
-                }
-
-                const interfaceCount = new Map<string, number>();
-                const nextInterface = async (index: number) => {
-                    const device = devices[index];
-                    const used = interfaceCount.get(device.id) ?? 0;
-                    interfaceCount.set(device.id, used + 1);
-                    return this.store.addInterface(
-                        created.id,
-                        device.id,
-                        demoInterfaceName(device.type, used)
-                    );
-                };
-                for (const [a, b] of plan.links) {
-                    const ifaceA = await nextInterface(a);
-                    const ifaceB = await nextInterface(b);
-                    await this.store.addConnection(created.id, ifaceA.id, ifaceB.id);
-                }
-                return created;
-            }
-        );
-
-        await this.openTopologyView(topology.id);
+        this.disposables.push(createCommand, openCommand);
     }
 
     private registerViewCommands(): void {

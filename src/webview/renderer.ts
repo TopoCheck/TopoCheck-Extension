@@ -1,6 +1,5 @@
 /**
  * Zeichnet die Topologie als SVG
- *
  */
 
 import type { DeviceType } from "../modules/topology/models";
@@ -59,7 +58,7 @@ export class SceneRenderer {
             patternUnits: "userSpaceOnUse",
         });
         this.gridPattern.append(svgElement("circle", { cx: 0.75, cy: 0.75, r: 0.75, class: "grid-dot" }));
-        defs.append(this.gridPattern);
+        defs.append(this.gridPattern, createSelectionOutlineFilter());
 
         const gridRect = svgElement("rect", {
             class: "grid",
@@ -207,7 +206,7 @@ export class SceneRenderer {
         const label = svgElement("text", {
             class: "device-label",
             x: 0,
-            y: ICON_SIZE / 2 + 16,
+            y: ICON_SIZE / 2 + 12,
             "text-anchor": "middle",
         });
 
@@ -279,4 +278,31 @@ export class SceneRenderer {
         element.line.setAttribute("x2", String(b.x));
         element.line.setAttribute("y2", String(b.y));
     }
+}
+
+function createSelectionOutlineFilter(): SVGFilterElement {
+    const filter = svgElement("filter", {
+        id: "selection-outline",
+        x: "-25%",
+        y: "-25%",
+        width: "150%",
+        height: "150%",
+    });
+    const threshold = svgElement("feComponentTransfer", { in: "SourceAlpha", result: "solid" });
+    threshold.append(svgElement("feFuncA", { type: "discrete", tableValues: "0 1" }));
+    filter.append(
+        threshold,
+        svgElement("feMorphology", { in: "solid", operator: "dilate", radius: 2, result: "grown" }),
+        svgElement("feFlood", { class: "selection-outline-color", result: "color" }),
+        svgElement("feComposite", { in: "color", in2: "grown", operator: "in", result: "outline" }),
+        (() => {
+            const merge = svgElement("feMerge");
+            merge.append(
+                svgElement("feMergeNode", { in: "outline" }),
+                svgElement("feMergeNode", { in: "SourceGraphic" })
+            );
+            return merge;
+        })()
+    );
+    return filter;
 }
