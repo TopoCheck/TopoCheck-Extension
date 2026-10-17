@@ -1,0 +1,19 @@
+{
+    /*
+     * TypeScript-Konfiguration für das Webview-Frontend (läuft im Browser, nicht in Node).
+     */
+    "extends": "../../tsconfig.json",
+    "compilerOptions": {
+        "lib": [
+            "ES2022",
+            "DOM",
+            "DOM.Iterable"
+        ],
+        "types": [],
+        "noEmit": true
+    },
+    "include": [
+        "./**/*.ts"
+    ],
+    "exclude": []
+}

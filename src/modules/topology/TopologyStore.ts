@@ -1,5 +1,9 @@
 import * as vscode from "vscode";
 import { randomUUID } from "crypto";
+import { isFinitePoint, roundPoint } from "../../shared/geometry";
+import { isHostnameTaken, nextHostname, validateHostname } from "./hostname";
+import { findFreeGridPosition } from "./layout";
+import { migrateTopology } from "./migrations";
 import {
     Connection,
     CURRENT_SCHEMA_VERSION,
@@ -7,6 +11,7 @@ import {
     DeviceConfig,
     DeviceType,
     Interface,
+    Position,
     Topology,
 } from "./models";
 
@@ -16,6 +21,7 @@ export enum TopologyChangeType {
     TopologyDeleted = "topologyDeleted",
     DeviceAdded = "deviceAdded",
     DeviceRemoved = "deviceRemoved",
+    DeviceUpdated = "deviceUpdated",
     ConnectionAdded = "connectionAdded",
     ConnectionRemoved = "connectionRemoved",
     DeviceConfigUpdated = "deviceConfigUpdated",
@@ -28,12 +34,45 @@ export interface TopologyChangeEvent {
     connectionId?: string;
 }
 
+/** Änderung der Darstellung (Positionen) */
+export interface LayoutChangeEvent {
+    topologyId: string;
+    deviceIds: string[];
+}
+
+/** Änderbare Stammdaten eines Geräts ("verwalten" in der Topologieansicht). */
+export interface DeviceUpdate {
+    label?: string;
+    hostname?: string;
+}
+
+export interface DeviceMove {
+    deviceId: string;
+    position: Position;
+}
+
+export interface NewDeviceInput {
+    type: DeviceType;
+    /** Ohne Angabe wird automatisch R1/SW1/PC1 … vergeben. */
+    hostname?: string;
+    /** Ohne Angabe wird der Hostname verwendet. */
+    label?: string;
+    /** Ohne Angabe wird ein freier Rasterplatz gewählt. */
+    position?: Position;
+}
+
 /*Verwaltung von Anlegen/Laden/Speichern/Löschen von Topologien. (CRUD)*/
 
 export class TopologyStore implements vscode.Disposable {
     private readonly onDidChangeTopologyEmitter =
         new vscode.EventEmitter<TopologyChangeEvent>();
     readonly onDidChangeTopology = this.onDidChangeTopologyEmitter.event;
+
+    private readonly onDidChangeLayoutEmitter =
+        new vscode.EventEmitter<LayoutChangeEvent>();
+    readonly onDidChangeLayout = this.onDidChangeLayoutEmitter.event;
+
+    private readonly writeQueues = new Map<string, Promise<void>>();
 
     constructor(private readonly storageUri: vscode.Uri) { }
 
@@ -47,6 +86,7 @@ export class TopologyStore implements vscode.Disposable {
             updatedAt: now,
             devices: [],
             connections: [],
+            layout: { devices: {} },
         };
 
         await this.persist(topology);
@@ -69,13 +109,16 @@ export class TopologyStore implements vscode.Disposable {
             );
         }
 
+        let parsed: unknown;
         try {
-            return JSON.parse(Buffer.from(raw).toString("utf8")) as Topology;
+            parsed = JSON.parse(Buffer.from(raw).toString("utf8"));
         } catch {
             throw new Error(
                 `Topology "${id}" ist beschädigt und konnte nicht gelesen werden (ungültiges JSON).`
             );
         }
+
+        return migrateTopology(parsed);
     }
 
     async listTopologies(): Promise<Topology[]> {
@@ -108,7 +151,9 @@ export class TopologyStore implements vscode.Disposable {
     }
 
     async deleteTopology(id: string): Promise<void> {
-        await vscode.workspace.fs.delete(this.fileUri(id), { useTrash: false });
+        await this.withWriteLock(id, async () => {
+            await vscode.workspace.fs.delete(this.fileUri(id), { useTrash: false });
+        });
         this.fireChange({
             type: TopologyChangeType.TopologyDeleted,
             topologyId: id,
@@ -116,23 +161,33 @@ export class TopologyStore implements vscode.Disposable {
     }
 
     // Geräte
-    async addDevice(
-        topologyId: string,
-        input: { label: string; hostname: string; type: DeviceType }
-    ): Promise<Device> {
-        const topology = await this.loadTopology(topologyId);
+    async addDevice(topologyId: string, input: NewDeviceInput): Promise<Device> {
+        const device = await this.withWriteLock(topologyId, async () => {
+            const topology = await this.loadTopology(topologyId);
+            const existingHostnames = topology.devices.map((d) => d.hostname);
 
-        const device: Device = {
-            id: randomUUID(),
-            topologyId,
-            label: input.label,
-            hostname: input.hostname,
-            type: input.type,
-            interfaces: [],
-        };
+            const hostname = input.hostname ?? nextHostname(input.type, existingHostnames);
+            this.assertHostnameAllowed(hostname, existingHostnames);
 
-        topology.devices.push(device);
-        await this.persist(topology);
+            const position = input.position
+                ? this.normalizePosition(input.position)
+                : findFreeGridPosition(Object.values(topology.layout.devices));
+
+            const newDevice: Device = {
+                id: randomUUID(),
+                topologyId,
+                label: input.label ?? hostname,
+                hostname,
+                type: input.type,
+                interfaces: [],
+            };
+
+            topology.devices.push(newDevice);
+            topology.layout.devices[newDevice.id] = position;
+            await this.persist(topology);
+            return newDevice;
+        });
+
         this.fireChange({
             type: TopologyChangeType.DeviceAdded,
             topologyId,
@@ -143,35 +198,109 @@ export class TopologyStore implements vscode.Disposable {
     }
 
     async removeDevice(topologyId: string, deviceId: string): Promise<void> {
-        const topology = await this.loadTopology(topologyId);
+        await this.withWriteLock(topologyId, async () => {
+            const topology = await this.loadTopology(topologyId);
 
-        if (!topology.devices.some((device) => device.id === deviceId)) {
-            throw new Error(
-                `Device "${deviceId}" existiert nicht in Topology "${topologyId}".`
+            if (!topology.devices.some((device) => device.id === deviceId)) {
+                throw new Error(
+                    `Device "${deviceId}" existiert nicht in Topology "${topologyId}".`
+                );
+            }
+
+            topology.devices = topology.devices.filter(
+                (device) => device.id !== deviceId
             );
-        }
+            delete topology.layout.devices[deviceId];
 
-        topology.devices = topology.devices.filter(
-            (device) => device.id !== deviceId
-        );
+            // Verbindungen zu nun nicht mehr existierenden Interfaces ebenfalls entfernen.
+            const remainingInterfaceIds = new Set(
+                topology.devices.flatMap((device) =>
+                    device.interfaces.map((iface) => iface.id)
+                )
+            );
+            topology.connections = topology.connections.filter(
+                (connection) =>
+                    remainingInterfaceIds.has(connection.interfaceAId) &&
+                    remainingInterfaceIds.has(connection.interfaceBId)
+            );
 
-        // Verbindungen zu nun nicht mehr existierenden Interfaces ebenfalls entfernen.
-        const remainingInterfaceIds = new Set(
-            topology.devices.flatMap((device) =>
-                device.interfaces.map((iface) => iface.id)
-            )
-        );
-        topology.connections = topology.connections.filter(
-            (connection) =>
-                remainingInterfaceIds.has(connection.interfaceAId) &&
-                remainingInterfaceIds.has(connection.interfaceBId)
-        );
+            await this.persist(topology);
+        });
 
-        await this.persist(topology);
         this.fireChange({
             type: TopologyChangeType.DeviceRemoved,
             topologyId,
             deviceId,
+        });
+    }
+
+    /** Hostname/Label ändern. Der Hostname wird nach IOS-Regeln und auf Eindeutigkeit geprüft. */
+    async updateDevice(
+        topologyId: string,
+        deviceId: string,
+        update: DeviceUpdate
+    ): Promise<Device> {
+        const device = await this.withWriteLock(topologyId, async () => {
+            const topology = await this.loadTopology(topologyId);
+            const target = this.findDeviceOrThrow(topology, deviceId);
+
+            if (update.hostname !== undefined) {
+                const otherHostnames = topology.devices
+                    .filter((d) => d.id !== deviceId)
+                    .map((d) => d.hostname);
+                this.assertHostnameAllowed(update.hostname, otherHostnames);
+                target.hostname = update.hostname;
+            }
+            if (update.label !== undefined) {
+                const label = update.label.trim();
+                if (label.length === 0) {
+                    throw new Error("Die Bezeichnung darf nicht leer sein.");
+                }
+                target.label = label;
+            }
+
+            await this.persist(topology);
+            return target;
+        });
+
+        this.fireChange({
+            type: TopologyChangeType.DeviceUpdated,
+            topologyId,
+            deviceId,
+        });
+
+        return device;
+    }
+
+    /**
+     * Verschiebt ein oder mehrere Geräte in einem Schreibvorgang.
+     * Alles-oder-nichts: ist eine Angabe ungültig, wird nichts geändert.
+     * Löst nur ein Layout-Event aus
+     */
+    async moveDevices(topologyId: string, moves: DeviceMove[]): Promise<void> {
+        if (moves.length === 0) {
+            return;
+        }
+
+        await this.withWriteLock(topologyId, async () => {
+            const topology = await this.loadTopology(topologyId);
+            const validated = moves.map((move) => {
+                this.findDeviceOrThrow(topology, move.deviceId);
+                return {
+                    deviceId: move.deviceId,
+                    position: this.normalizePosition(move.position),
+                };
+            });
+
+            for (const move of validated) {
+                topology.layout.devices[move.deviceId] = move.position;
+            }
+            await this.persist(topology);
+        });
+
+        this.onDidChangeLayoutEmitter.fire({
+            topologyId,
+            deviceIds: moves.map((move) => move.deviceId),
         });
     }
 
@@ -181,20 +310,22 @@ export class TopologyStore implements vscode.Disposable {
         deviceId: string,
         name: string
     ): Promise<Interface> {
-        const topology = await this.loadTopology(topologyId);
-        const device = this.findDeviceOrThrow(topology, deviceId);
+        return this.withWriteLock(topologyId, async () => {
+            const topology = await this.loadTopology(topologyId);
+            const device = this.findDeviceOrThrow(topology, deviceId);
 
-        const iface: Interface = {
-            id: randomUUID(),
-            deviceId,
-            name,
-            status: "down",
-        };
+            const iface: Interface = {
+                id: randomUUID(),
+                deviceId,
+                name,
+                status: "down",
+            };
 
-        device.interfaces.push(iface);
-        await this.persist(topology);
+            device.interfaces.push(iface);
+            await this.persist(topology);
 
-        return iface;
+            return iface;
+        });
     }
 
     async setInterfaceStatus(
@@ -202,20 +333,22 @@ export class TopologyStore implements vscode.Disposable {
         interfaceId: string,
         status: Interface["status"]
     ): Promise<void> {
-        const topology = await this.loadTopology(topologyId);
+        await this.withWriteLock(topologyId, async () => {
+            const topology = await this.loadTopology(topologyId);
 
-        for (const device of topology.devices) {
-            const iface = device.interfaces.find((i) => i.id === interfaceId);
-            if (iface) {
-                iface.status = status;
-                await this.persist(topology);
-                return;
+            for (const device of topology.devices) {
+                const iface = device.interfaces.find((i) => i.id === interfaceId);
+                if (iface) {
+                    iface.status = status;
+                    await this.persist(topology);
+                    return;
+                }
             }
-        }
 
-        throw new Error(
-            `Interface "${interfaceId}" existiert nicht in Topology "${topologyId}".`
-        );
+            throw new Error(
+                `Interface "${interfaceId}" existiert nicht in Topology "${topologyId}".`
+            );
+        });
     }
 
     //Verbindungen
@@ -224,41 +357,45 @@ export class TopologyStore implements vscode.Disposable {
         interfaceAId: string,
         interfaceBId: string
     ): Promise<Connection> {
-        const topology = await this.loadTopology(topologyId);
+        const connection = await this.withWriteLock(topologyId, async () => {
+            const topology = await this.loadTopology(topologyId);
 
-        const allInterfaceIds = new Set(
-            topology.devices.flatMap((device) =>
-                device.interfaces.map((iface) => iface.id)
-            )
-        );
-        if (!allInterfaceIds.has(interfaceAId) || !allInterfaceIds.has(interfaceBId)) {
-            throw new Error(
-                "Beide Interfaces müssen zu einem Gerät dieser Topology gehören."
+            const allInterfaceIds = new Set(
+                topology.devices.flatMap((device) =>
+                    device.interfaces.map((iface) => iface.id)
+                )
             );
-        }
+            if (!allInterfaceIds.has(interfaceAId) || !allInterfaceIds.has(interfaceBId)) {
+                throw new Error(
+                    "Beide Interfaces müssen zu einem Gerät dieser Topology gehören."
+                );
+            }
 
-        const isAlreadyConnected = topology.connections.some(
-            (connection) =>
-                connection.interfaceAId === interfaceAId ||
-                connection.interfaceBId === interfaceAId ||
-                connection.interfaceAId === interfaceBId ||
-                connection.interfaceBId === interfaceBId
-        );
-        if (isAlreadyConnected) {
-            throw new Error(
-                "Mindestens eines der beiden Interfaces ist bereits verbunden."
+            const isAlreadyConnected = topology.connections.some(
+                (existing) =>
+                    existing.interfaceAId === interfaceAId ||
+                    existing.interfaceBId === interfaceAId ||
+                    existing.interfaceAId === interfaceBId ||
+                    existing.interfaceBId === interfaceBId
             );
-        }
+            if (isAlreadyConnected) {
+                throw new Error(
+                    "Mindestens eines der beiden Interfaces ist bereits verbunden."
+                );
+            }
 
-        const connection: Connection = {
-            id: randomUUID(),
-            topologyId,
-            interfaceAId,
-            interfaceBId,
-        };
+            const newConnection: Connection = {
+                id: randomUUID(),
+                topologyId,
+                interfaceAId,
+                interfaceBId,
+            };
 
-        topology.connections.push(connection);
-        await this.persist(topology);
+            topology.connections.push(newConnection);
+            await this.persist(topology);
+            return newConnection;
+        });
+
         this.fireChange({
             type: TopologyChangeType.ConnectionAdded,
             topologyId,
@@ -272,19 +409,22 @@ export class TopologyStore implements vscode.Disposable {
         topologyId: string,
         connectionId: string
     ): Promise<void> {
-        const topology = await this.loadTopology(topologyId);
+        await this.withWriteLock(topologyId, async () => {
+            const topology = await this.loadTopology(topologyId);
 
-        if (!topology.connections.some((c) => c.id === connectionId)) {
-            throw new Error(
-                `Connection "${connectionId}" existiert nicht in Topology "${topologyId}".`
+            if (!topology.connections.some((c) => c.id === connectionId)) {
+                throw new Error(
+                    `Connection "${connectionId}" existiert nicht in Topology "${topologyId}".`
+                );
+            }
+
+            topology.connections = topology.connections.filter(
+                (c) => c.id !== connectionId
             );
-        }
 
-        topology.connections = topology.connections.filter(
-            (c) => c.id !== connectionId
-        );
+            await this.persist(topology);
+        });
 
-        await this.persist(topology);
         this.fireChange({
             type: TopologyChangeType.ConnectionRemoved,
             topologyId,
@@ -298,18 +438,22 @@ export class TopologyStore implements vscode.Disposable {
         deviceId: string,
         filePath: string
     ): Promise<DeviceConfig> {
-        const topology = await this.loadTopology(topologyId);
-        const device = this.findDeviceOrThrow(topology, deviceId);
+        const config = await this.withWriteLock(topologyId, async () => {
+            const topology = await this.loadTopology(topologyId);
+            const device = this.findDeviceOrThrow(topology, deviceId);
 
-        const config: DeviceConfig = {
-            id: device.config?.id ?? randomUUID(),
-            deviceId,
-            filePath,
-            updatedAt: new Date().toISOString(),
-        };
+            const newConfig: DeviceConfig = {
+                id: device.config?.id ?? randomUUID(),
+                deviceId,
+                filePath,
+                updatedAt: new Date().toISOString(),
+            };
 
-        device.config = config;
-        await this.persist(topology);
+            device.config = newConfig;
+            await this.persist(topology);
+            return newConfig;
+        });
+
         this.fireChange({
             type: TopologyChangeType.DeviceConfigUpdated,
             topologyId,
@@ -320,6 +464,45 @@ export class TopologyStore implements vscode.Disposable {
     }
 
     //Intern
+
+    /**
+     * Führt "task" erst aus, wenn alle vorher angemeldeten Schreibvorgänge derselben
+     * Topologie abgeschlossen sind (egal ob erfolgreich oder mit Fehler).
+     */
+    private withWriteLock<T>(topologyId: string, task: () => Promise<T>): Promise<T> {
+        const previous = this.writeQueues.get(topologyId) ?? Promise.resolve();
+        const result = previous.then(task);
+        // Fehler dürfen die Kette nicht blockieren – der Aufrufer bekommt sie über "result".
+        const tail = result.then(
+            () => undefined,
+            () => undefined
+        );
+        this.writeQueues.set(topologyId, tail);
+        void tail.then(() => {
+            if (this.writeQueues.get(topologyId) === tail) {
+                this.writeQueues.delete(topologyId);
+            }
+        });
+        return result;
+    }
+
+    private normalizePosition(position: Position): Position {
+        if (!isFinitePoint(position)) {
+            throw new Error("Ungültige Position: x und y müssen endliche Zahlen sein.");
+        }
+        return roundPoint(position);
+    }
+
+    private assertHostnameAllowed(hostname: string, otherHostnames: string[]): void {
+        const error = validateHostname(hostname);
+        if (error) {
+            throw new Error(error);
+        }
+        if (isHostnameTaken(hostname, otherHostnames)) {
+            throw new Error(`Der Hostname "${hostname}" ist in dieser Topologie bereits vergeben.`);
+        }
+    }
+
     private findDeviceOrThrow(topology: Topology, deviceId: string): Device {
         const device = topology.devices.find((d) => d.id === deviceId);
         if (!device) {
@@ -361,5 +544,6 @@ export class TopologyStore implements vscode.Disposable {
 
     dispose(): void {
         this.onDidChangeTopologyEmitter.dispose();
+        this.onDidChangeLayoutEmitter.dispose();
     }
 }
