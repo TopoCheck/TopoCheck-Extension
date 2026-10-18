@@ -109,6 +109,10 @@ export class CiscoIosProtocolParser {
       this.parseOspf(command, this.currentOspf, report);
       return true;
     }
+    if (childCommand) {
+      report("error", `Der Befehl benötigt einen passenden VLAN- oder OSPF-Abschnitt: ${command}`);
+      return true;
+    }
     return false;
   }
 
@@ -173,8 +177,15 @@ export class CiscoIosProtocolParser {
       }
       return;
     }
-    report(/^(?:router-id|network|(?:no\s+)?passive-interface)(?:\s|$)/.test(command) ? "error" : "warning",
-      `Invalid or unsupported OSPF command: ${command}`);
+    if (/^router-id(?:\s|$)/.test(command)) {
+      report("error", "Ungültige OSPF-Router-ID. Erwartet: router-id <gültige IPv4-Adresse>.");
+    } else if (/^network(?:\s|$)/.test(command)) {
+      report("error", "Ungültiges OSPF-Netzwerk. Erwartet: network <IPv4-Adresse> <zusammenhängende Wildcard-Maske> area <0-4294967295 oder IPv4-Schreibweise>.");
+    } else if (/^(?:no\s+)?passive-interface(?:\s|$)/.test(command)) {
+      report("error", "Erwartet: [no] passive-interface <unterstützter Interface-Name oder default>.");
+    } else {
+      report("warning", `Nicht unterstützter OSPF-Befehl: ${command}`);
+    }
   }
 }
 
@@ -184,7 +195,7 @@ export function parseSwitchport(command: string, networkInterface: NetworkInterf
     report("error", "Switchport commands require a switch in the H1c model.");
     return;
   }
-  if (command === "no switchport") {
+  if (/^no\s+switchport$/.test(command)) {
     networkInterface.switchport = undefined;
     return;
   }

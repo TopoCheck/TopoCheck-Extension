@@ -29,8 +29,8 @@ Befehle erzeugen Fehler; gültige vorherige Werte bleiben erhalten. Auch bei
 vorhandenem Gerät müssen Aufrufer die Diagnosen prüfen, da Teilergebnisse
 möglich sind. Die Schnittstelle ist unabhängig von VS Code.
 
-Noch nicht umgesetzt: Dateizugriffe, Editor-Anbindung, DHCP-Adressen, sekundäre
-IP-Adressen und mehrzeilige Banner. Der bisherige Editor-Validator bleibt
+Noch nicht umgesetzt: Dateizugriffe, Editor-Anbindung, DHCP-Adressen und sekundäre
+IP-Adressen. Banner-Inhalte werden übersprungen und nicht modelliert. Der bisherige Editor-Validator bleibt
 unverändert. Das abschließende Review für die gesamte H1e-Aufgabe steht noch aus.
 
 ## VLANs, Switchports und Routing
@@ -85,6 +85,33 @@ Trunk-Switch, Router mit statischen Routen und Router mit zwei OSPF-Prozessen.
 npm.cmd run compile-tests
 node node_modules/mocha/bin/mocha.js --ui tdd "out/test/parser/**/*.test.js"
 ```
+
+## Validierung und Fehlerbehandlung
+
+Jede zeilenbezogene Diagnose enthält `line` (ab 1), `severity`, `message` und
+`command` (getrimmte Quellzeile). Bei ungültigen Aufrufargumenten kann `command`
+fehlen. Leere Konfigurationen und ungültige Laufzeitargumente des Einzelparsers
+werden als Fehler zurückgegeben. Meldungen unterscheiden ungültige unterstützte
+Syntax (`error`) und unbekannte bzw. nicht unterstützte Befehle (`warning`).
+OSPF-Unterbefehle außerhalb ihres Abschnitts erzeugen Kontextfehler.
+
+Nach einem Fehler wird die nächste Zeile verarbeitet. Eine ungültige neue
+IP-Konfiguration, Router-ID, VLAN-Liste oder Route überschreibt keine zuvor
+gültigen Werte. Ungültige Abschnittsheader verwerfen den aktuellen Kontext,
+damit ihre Unterbefehle nicht versehentlich zum vorherigen Abschnitt gehören.
+Beim nächsten gültigen Abschnitt kann die Verarbeitung wieder regulär fortfahren.
+
+`banner <Typ> <Trennzeichen>` wird als nicht modellierter Abschnitt gemeldet;
+der Inhalt wird bis zum nächsten Trennzeichen übersprungen. Unterstützt werden
+einzelne Trennzeichen und die Textdarstellung `^C` bzw. ähnliche Caret-Paare.
+Ohne abschließendes Trennzeichen wird an der Startzeile ein Fehler gemeldet.
+In diesem Fall bleibt der Rest der Datei Banner-Inhalt und wird nicht als
+Konfiguration interpretiert. Einzeilige Banner werden ebenfalls übersprungen.
+
+Die Dateien `invalid-values.cfg` und `unknown-syntax.cfg` prüfen die
+Fehlerfortsetzung mit echten Konfigurationstexten. Weitere Tests decken leere
+Eingaben, ungültige Aufrufargumente, fehlerhafte Header, Kontextfehler,
+nicht abgeschlossene Banner und wechselnde Kombinationen fehlerhafter Befehle ab.
 
 ## Anbindung an H1c
 
