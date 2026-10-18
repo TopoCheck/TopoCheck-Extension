@@ -71,7 +71,7 @@ erzeugen Fehlerdiagnosen statt Exceptions. Layer-3-Switches benötigen eine
 spätere Erweiterung dieser Modellregel.
 
 Nicht unterstützt werden insbesondere Interface-/VLAN-Bereiche als Blockheader,
-abgekürzte Interface-Namen, dynamische Switchport-Modi, VRFs, IPv6,
+dynamische Switchport-Modi, VRFs, IPv6,
 Route-Optionen wie `track`/`name`/`tag`, OSPF-Authentifizierung, OSPF-Aktivierung
 direkt am Interface sowie weitere `no`-Befehle zum Löschen von VLANs, Routen
 oder OSPF-Einstellungen. Nicht unterstützte Befehle bleiben als Diagnosen
@@ -112,6 +112,30 @@ Die Dateien `invalid-values.cfg` und `unknown-syntax.cfg` prüfen die
 Fehlerfortsetzung mit echten Konfigurationstexten. Weitere Tests decken leere
 Eingaben, ungültige Aufrufargumente, fehlerhafte Header, Kontextfehler,
 nicht abgeschlossene Banner und wechselnde Kombinationen fehlerhafter Befehle ab.
+
+## Abkürzungen
+
+Vor der Auswertung werden eindeutige Schlüsselwort-Präfixe innerhalb der
+unterstützten Befehlsstruktur aufgelöst (ohne Beachtung der Groß-/Kleinschreibung).
+Beispiele: `int gi0/0`, `desc Uplink`, `ip add ...`, `no shut`,
+`sw mo acc`, `sw tr all vl 10,20`, `rou os 1`, `net ... ar 0`.
+Jedes längere Präfix bis zum vollständigen Schlüsselwort ist ebenfalls erlaubt.
+Bei exakter Übereinstimmung gilt das vollständige Schlüsselwort.
+Die Auflösung berücksichtigt Interface-, VLAN- und OSPF-Kontext. Mehrdeutige
+Eingaben werden mit möglichen Schlüsselwörtern als Fehler gemeldet. Beispielsweise
+ist `i` zwischen `interface` und `ip` mehrdeutig, `e` zwischen `end` und `exit`.
+Nach `allowed vlan` benötigt `add` mindestens `ad`, `all` mindestens `al`.
+
+Interface-Namen werden über eindeutige Präfixe der unterstützten Kategorien
+vereinheitlicht: `E`, `Fa`, `Gi`, `Lo`, `Vl` und längere Präfixe. Auch
+einbuchstabige Formen `F`, `G`, `L`, `V` sind innerhalb dieser Parser-Grammatik
+eindeutig. Für Routen sind zusätzlich `Serial` und `Null` mit Präfixen möglich.
+Ungültige Portnummern wie `fa0/w` werden dadurch nicht gültig. Erneute Blöcke
+mit verschiedenen Schreibweisen desselben Interfaces landen im gleichen Modellobjekt.
+
+Beschreibungen, Namen, Zahlenwerte und Banner-Inhalte bleiben unverändert;
+Diagnosen enthalten weiterhin die originale Quellzeile. Die Eindeutigkeit gilt
+für diese Parser-Grammatik, nicht für sämtliche Befehle jeder IOS-Version.
 
 ## Anbindung an H1c
 

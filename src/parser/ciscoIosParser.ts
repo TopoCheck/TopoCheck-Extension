@@ -1,5 +1,6 @@
 import { DeviceType, InterfaceType, NetworkDevice, NetworkInterface } from "../models";
 import { CiscoIosProtocolParser, isIpv4Mask, parseSwitchport } from "./ciscoIosProtocolParser";
+import { expandCiscoCommand } from "./ciscoIosAbbreviations";
 
 export interface CiscoIosParserOptions {
   /** Stable identity supplied by the caller, independent of the hostname. */
@@ -56,7 +57,7 @@ export function parseCiscoConfig(
   const protocolParser = new CiscoIosProtocolParser(options.deviceType, options.deviceId.trim());
   for (const [index, rawLine] of lines.entries()) {
     const line = index + 1;
-    const command = rawLine.trim();
+    let command = rawLine.trim();
     if (banner) {
       if (command.includes(banner.delimiter)) {
         banner = undefined;
@@ -72,6 +73,18 @@ export function parseCiscoConfig(
       unsupportedSection = false;
       continue;
     }
+    const expanded = expandCiscoCommand(command, currentInterface ? "interface" : protocolParser.context);
+    if (expanded.error) {
+      report(line, "error", expanded.error);
+      // An ambiguous global header must not leave the preceding section active.
+      if (!/^\s/.test(rawLine)) {
+        currentInterface = undefined;
+        protocolParser.resetContext();
+        unsupportedSection = true;
+      }
+      continue;
+    }
+    command = expanded.command;
     if (command === "end") {
       break;
     }

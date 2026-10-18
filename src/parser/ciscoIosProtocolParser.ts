@@ -26,6 +26,10 @@ export class CiscoIosProtocolParser {
     this.blocked = false;
   }
 
+  public get context(): "vlan" | "ospf" | "global" {
+    return this.currentVlan ? "vlan" : this.currentOspf ? "ospf" : "global";
+  }
+
   public get protocols(): NetworkProtocol[] {
     return [
       ...(this.vlan.vlans.length ? [this.vlan] : []),

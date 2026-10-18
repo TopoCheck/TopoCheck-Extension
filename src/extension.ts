@@ -1,7 +1,9 @@
 import * as vscode from "vscode";
 import { validateConfiguration } from "./validation/configValidator";
+import { registerParserPreview } from "./commands/previewParser";
 
 export function activate(context: vscode.ExtensionContext): void {
+  registerParserPreview(context);
   const diagnostics =
     vscode.languages.createDiagnosticCollection("topocheck");
 
