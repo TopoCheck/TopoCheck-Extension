@@ -29,9 +29,27 @@ Befehle erzeugen Fehler; gültige vorherige Werte bleiben erhalten. Auch bei
 vorhandenem Gerät müssen Aufrufer die Diagnosen prüfen, da Teilergebnisse
 möglich sind. Die Schnittstelle ist unabhängig von VS Code.
 
-Noch nicht umgesetzt: Dateizugriffe, Editor-Anbindung, DHCP-Adressen und sekundäre
-IP-Adressen. Banner-Inhalte werden übersprungen und nicht modelliert. Der bisherige Editor-Validator bleibt
-unverändert. Das abschließende Review für die gesamte H1e-Aufgabe steht noch aus.
+Noch nicht umgesetzt: eigenständige Dateiverwaltung, DHCP-Adressen und sekundäre
+IP-Adressen. Banner-Inhalte werden übersprungen und nicht modelliert.
+Das abschließende Review für die gesamte H1e-Aufgabe steht noch aus.
+
+## Prüfung im Editor
+
+Die automatische Prüfung beim Öffnen und Bearbeiten sowie der Befehl
+`TopoCheck: Validate Current Configuration` verwenden ausschließlich den Parser.
+`configValidator.ts` übersetzt dessen Diagnosen in VS-Code-Markierungen und
+enthält keine eigenen Syntaxregeln. Fehler erscheinen als Fehler, unbekannte
+Befehle als Warnungen mit Quelle `TopoCheck Parser` im Bereich Probleme.
+Bei erneuter Prüfung werden die bisherigen Diagnosen ersetzt; beim Schließen
+der Datei werden sie entfernt.
+
+Die Befehle `Validate Current Configuration` und `Parser testen (H1e)` fragen
+nach Router oder Switch. Die Auswahl gilt für beide Funktionen und die weitere
+automatische Prüfung dieser Datei bis zum Schließen oder Neustart. Ohne Auswahl
+wird Router angenommen. Für Switch-Konfigurationen deshalb einmal einen der
+beiden Befehle ausführen und Switch wählen. Die Vorschau zeigt zusätzlich das
+H1c-Datenmodell im Ausgabekanal `TopoCheck Parser`. Ungespeicherte Änderungen
+werden berücksichtigt. Ein Soll-Ist-Vergleich ist weiterhin nicht enthalten.
 
 ## VLANs, Switchports und Routing
 
@@ -175,4 +193,4 @@ Physische Verbindungen werden nicht aus IP-Adressen oder Beschreibungen geraten.
 Sie können über `NetworkTopology.addConnection` aus einer separaten Quelle
 ergänzt werden. Der Integrationstest prüft diesen Weg und die direkte Verwendung
 des Parser-Ergebnisses durch `analyzeTopology`. Ein eigentlicher Soll-Ist-Vergleich
-und die Editor-Anbindung sind nicht Teil dieser Anbindung.
+ist nicht Teil dieser Anbindung.
