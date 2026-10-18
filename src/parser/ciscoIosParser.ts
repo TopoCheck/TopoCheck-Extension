@@ -1,4 +1,5 @@
 import { DeviceType, InterfaceType, NetworkDevice, NetworkInterface } from "../models";
+import { CiscoIosProtocolParser, isIpv4Mask, parseSwitchport } from "./ciscoIosProtocolParser";
 
 export interface CiscoIosParserOptions {
   /** Stable identity supplied by the caller, independent of the hostname. */
@@ -26,6 +27,7 @@ export function parseCiscoConfig(
 ): CiscoIosParseResult {
   const diagnostics: ParserDiagnostic[] = [];
   const interfaces = new Map<string, NetworkInterface>();
+  const protocolParser = new CiscoIosProtocolParser(options.deviceType, options.deviceId.trim());
   let hostname: string | undefined;
   let currentInterface: NetworkInterface | undefined;
   // Unsupported sections must not leak their child commands into a previous interface.
@@ -47,6 +49,7 @@ export function parseCiscoConfig(
       continue;
     }
     if (command.startsWith("!")) {
+      protocolParser.resetContext();
       currentInterface = undefined;
       unsupportedSection = false;
       continue;
@@ -55,12 +58,14 @@ export function parseCiscoConfig(
       break;
     }
     if (command === "exit" || command === "configure terminal") {
+      protocolParser.resetContext();
       currentInterface = undefined;
       unsupportedSection = false;
       continue;
     }
 
     if (/^hostname(?:\s|$)/.test(command)) {
+      protocolParser.resetContext();
       currentInterface = undefined;
       unsupportedSection = false;
       const match = /^hostname\s+([A-Za-z0-9][A-Za-z0-9_.-]*)$/.exec(command);
@@ -73,6 +78,7 @@ export function parseCiscoConfig(
     }
 
     if (/^interface(?:\s|$)/.test(command)) {
+      protocolParser.resetContext();
       currentInterface = undefined;
       unsupportedSection = true;
       const match = /^interface\s+(\S+)$/.exec(command);
@@ -97,8 +103,15 @@ export function parseCiscoConfig(
       continue;
     }
 
+    if (protocolParser.parse(command, /^\s/.test(rawLine),
+      (severity, message) => report(line, severity, message))) {
+      currentInterface = undefined;
+      unsupportedSection = false;
+      continue;
+    }
+
     // Global unsupported sections and commands end the previous interface context.
-    const interfaceCommand = /^(?:description(?:\s|$)|(?:no\s+)?shutdown(?:\s|$)|(?:no\s+)?ip\s+address(?:\s|$)|no\s+description$)/.test(command);
+    const interfaceCommand = /^(?:description(?:\s|$)|(?:no\s+)?switchport(?:\s|$)|(?:no\s+)?shutdown(?:\s|$)|(?:no\s+)?ip\s+address(?:\s|$)|no\s+description$)/.test(command);
     if (!/^\s/.test(rawLine) && !interfaceCommand) {
       currentInterface = undefined;
       unsupportedSection = true;
@@ -112,7 +125,10 @@ export function parseCiscoConfig(
       continue;
     }
 
-    if (/^description\s+\S/.test(command)) {
+    if (/^(?:no\s+)?switchport(?:\s|$)/.test(command)) {
+      parseSwitchport(command, currentInterface, options.deviceType,
+        (severity, message) => report(line, severity, message));
+    } else if (/^description\s+\S/.test(command)) {
       currentInterface.description = command.replace(/^description\s+/, "");
     } else if (command === "no description") {
       currentInterface.description = undefined;
@@ -128,7 +144,7 @@ export function parseCiscoConfig(
         report(line, "error", `Invalid or unsupported interface syntax: ${command}`);
         continue;
       }
-      if (!isSubnetMask(match[2])) {
+      if (!isIpv4Mask(match[2])) {
         report(line, "error", `Invalid contiguous IPv4 subnet mask: ${match[2]}`);
         continue;
       }
@@ -150,6 +166,9 @@ export function parseCiscoConfig(
   for (const networkInterface of interfaces.values()) {
     device.addInterface(networkInterface);
   }
+  for (const protocol of protocolParser.protocols) {
+    device.addProtocol(protocol);
+  }
   return { device, diagnostics };
 }
 
@@ -162,16 +181,4 @@ function interfaceType(name: string): InterfaceType | undefined {
     [/^Vlan\d+$/, InterfaceType.Vlan]
   ];
   return types.find(([pattern]) => pattern.test(name))?.[1];
-}
-
-function isSubnetMask(value: string): boolean {
-  if (!/^(?:\d{1,3}\.){3}\d{1,3}$/.test(value)) {
-    return false;
-  }
-  const octets = value.split(".").map(Number);
-  if (octets.some((octet) => octet > 255)) {
-    return false;
-  }
-  const bits = octets.map((octet) => octet.toString(2).padStart(8, "0")).join("");
-  return /^1*0*$/.test(bits);
 }

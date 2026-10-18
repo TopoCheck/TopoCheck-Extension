@@ -1,6 +1,6 @@
 # UML-Klassendiagramm: Netzwerk-Datenmodell
 
-Dieses Diagramm bildet den implementierten Stand von Subziel H1.c ab.
+Dieses Diagramm bildet H1c einschließlich der Protokollerweiterungen aus H1e ab.
 
 ```mermaid
 classDiagram
@@ -41,6 +41,8 @@ classDiagram
         +string id
         +string name
         +InterfaceType type
+        +string? description
+        +SwitchportConfiguration? switchport
         +boolean enabled
         +string? ipAddress
         +string? subnetMask
@@ -65,6 +67,45 @@ classDiagram
         +usesDevice(deviceId) boolean
         +usesInterface(deviceId, interfaceId) boolean
         +connectsSameEndpoints(other) boolean
+    }
+
+    class VlanProtocol {
+        +VlanConfiguration[] vlans
+    }
+    class VlanConfiguration {
+        +number vlanId
+        +string? name
+    }
+    class StaticRouteProtocol {
+        +StaticRouteConfiguration[] routes
+    }
+    class StaticRouteConfiguration {
+        +string destination
+        +string subnetMask
+        +string? nextHop
+        +string? outgoingInterface
+        +number? administrativeDistance
+    }
+    class OspfProtocol {
+        +OspfProcessConfiguration[] processes
+    }
+    class OspfProcessConfiguration {
+        +number processId
+        +string? routerId
+        +OspfNetworkConfiguration[] networks
+        +boolean passiveInterfaceDefault
+        +Record~string,boolean~ passiveInterfaces
+    }
+    class OspfNetworkConfiguration {
+        +string address
+        +string wildcardMask
+        +string area
+    }
+    class SwitchportConfiguration {
+        +string? mode
+        +number? accessVlan
+        +number? nativeVlan
+        +number[] allowedVlans
     }
 
     class TopologyAnalyzer {
@@ -125,6 +166,14 @@ classDiagram
     NetworkDevice --> DeviceType : has type
     NetworkInterface --> InterfaceType : has type
     NetworkProtocol --> ProtocolType : has type
+    NetworkProtocol <|-- VlanProtocol
+    NetworkProtocol <|-- StaticRouteProtocol
+    NetworkProtocol <|-- OspfProtocol
+    VlanProtocol *-- VlanConfiguration
+    StaticRouteProtocol *-- StaticRouteConfiguration
+    OspfProtocol *-- OspfProcessConfiguration
+    OspfProcessConfiguration *-- OspfNetworkConfiguration
+    NetworkInterface --> SwitchportConfiguration
     TopologyAnalyzer ..> NetworkTopology : analyzes
     TopologyAnalyzer ..> TopologyIssue : returns
 ```
@@ -144,5 +193,5 @@ classDiagram
 - [x] Namen und Typen der öffentlichen Eigenschaften stimmen überein.
 - [x] Öffentliche Methoden stimmen mit der Implementierung überein.
 - [x] Kardinalitäten entsprechen der tatsächlichen Modelllogik.
-- [x] Der Branch-Diff wurde geprüft; dabei waren keine weiteren UML-Änderungen nötig.
+- [x] Die H1e-Protokoll- und Interface-Erweiterungen sind dargestellt.
 

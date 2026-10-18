@@ -38,7 +38,7 @@ suite("Cisco IOS parser", () => {
   test("isolates unsupported sections from the previous interface", () => {
     const result = parseCiscoConfig([
       "hostname R1", "interface Loopback0", " no shutdown",
-      "router ospf 1", " shutdown", "interface Serial0/0", " ip address 10.0.0.1 255.0.0.0"
+      "router rip", " shutdown", "interface Serial0/0", " ip address 10.0.0.1 255.0.0.0"
     ].join("\n"), options);
     assert.strictEqual(result.device?.interfaces[0].enabled, true);
     assert.strictEqual(result.device?.interfaces[0].ipAddress, undefined);

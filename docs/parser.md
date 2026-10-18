@@ -29,11 +29,62 @@ Befehle erzeugen Fehler; gültige vorherige Werte bleiben erhalten. Auch bei
 vorhandenem Gerät müssen Aufrufer die Diagnosen prüfen, da Teilergebnisse
 möglich sind. Die Schnittstelle ist unabhängig von VS Code.
 
-Noch nicht umgesetzt: Dateizugriffe, Editor-Anbindung, VLAN-Definitionen,
-Switchports, Routingprotokolle, statische Routen, DHCP-Adressen, sekundäre
+Noch nicht umgesetzt: Dateizugriffe, Editor-Anbindung, DHCP-Adressen, sekundäre
 IP-Adressen und mehrzeilige Banner. Der bisherige Editor-Validator bleibt
-unverändert. Die fünf vollständigen Testkonfigurationsdateien und das
-abschließende Review für die gesamte H1e-Aufgabe stehen noch aus.
+unverändert. Das abschließende Review für die gesamte H1e-Aufgabe steht noch aus.
+
+## VLANs, Switchports und Routing
+
+Die spezifischen H1c-Protokollklassen in `src/models/ciscoProtocols.ts` erben von
+`NetworkProtocol` und bleiben über `device.protocols` zugänglich. Mit
+`instanceof VlanProtocol`, `StaticRouteProtocol` oder `OspfProtocol` können
+Konsumenten auf die typisierten Einstellungen zugreifen. Pro Gerät existiert
+weiterhin höchstens ein Objekt je Protokolltyp. Mehrere OSPF-Prozesse werden in
+`OspfProtocol.processes` zusammengefasst.
+
+| Bereich | Unterstützte Syntax und Daten |
+|---|---|
+| VLANs | `vlan <1-4094>`, darunter `name <Name>` (ein Wort, höchstens 32 Zeichen) |
+| Switchports | `switchport`, `no switchport`, `switchport mode access/trunk`, `switchport access vlan <ID>`, `switchport trunk native vlan <ID>` |
+| Trunk-Liste | `switchport trunk allowed vlan <Liste/all/none>` sowie `add`, `remove`, `except` mit ID-Liste; Listen enthalten IDs und Bereiche wie `10,20-22` |
+| Statische Routen | `ip route <Netz> <Maske> <Next-Hop und/oder Ausgangsinterface> [Distanz]`; Distanz 1–255, auch `Null0` |
+| OSPF | `router ospf <1-65535>`, darunter `router-id <IPv4>`, `network <IPv4> <Wildcard> area <Area>`, `[no] passive-interface <Interface/default>` |
+
+Switchport-Daten liegen in `NetworkInterface.switchport`. Eine fehlende
+`allowedVlans`-Liste bedeutet alle VLANs, eine leere Liste keine VLANs. Andere
+nicht gesetzte Switchport-Felder bleiben unbekannt; der Parser ergänzt keine
+geräteabhängigen Default-Werte. VLAN-Zuordnungen erfordern keine explizite
+VLAN-Definition in derselben Datei. `no switchport` entfernt die gespeicherten
+Switchport-Einstellungen; ein eigener Zustand für einen gerouteten Port wird
+aktuell nicht modelliert.
+
+Statische Routenziele müssen Netzadressen mit zusammenhängender Maske sein.
+OSPF unterstützt zusammenhängende Wildcard-Masken und Areas als Dezimalzahl
+(0–4294967295) oder IPv4-Schreibweise. Areas werden als dezimale Strings
+normalisiert. Passive-Interface-Vorgabe und explizite Ausnahmen werden getrennt
+gespeichert. Wiederholte identische Routen und OSPF-Netzwerke werden dedupliziert;
+erneute VLAN-/Prozessblöcke aktualisieren bestehende Objekte.
+
+Die H1c-Kompatibilitätsregeln gelten weiterhin: VLANs und Switchports nur für
+Switches, statische Routen und OSPF nur für Router. Inkompatible Konfigurationen
+erzeugen Fehlerdiagnosen statt Exceptions. Layer-3-Switches benötigen eine
+spätere Erweiterung dieser Modellregel.
+
+Nicht unterstützt werden insbesondere Interface-/VLAN-Bereiche als Blockheader,
+abgekürzte Interface-Namen, dynamische Switchport-Modi, VRFs, IPv6,
+Route-Optionen wie `track`/`name`/`tag`, OSPF-Authentifizierung, OSPF-Aktivierung
+direkt am Interface sowie weitere `no`-Befehle zum Löschen von VLANs, Routen
+oder OSPF-Einstellungen. Nicht unterstützte Befehle bleiben als Diagnosen
+sichtbar und werden nicht stillschweigend in das Modell übernommen.
+
+Fünf gültige Testdateien liegen unter `src/test/parser/fixtures` und werden in
+Unit-Tests mit konkreten erwarteten Werten geprüft: Basisrouter, VLAN-Switch,
+Trunk-Switch, Router mit statischen Routen und Router mit zwei OSPF-Prozessen.
+
+```powershell
+npm.cmd run compile-tests
+node node_modules/mocha/bin/mocha.js --ui tdd "out/test/parser/**/*.test.js"
+```
 
 ## Anbindung an H1c
 

@@ -58,7 +58,7 @@ suite("Cisco IOS topology model integration", () => {
 
   test("retains warnings and leaves physical connections to the caller", () => {
     const input = configuration("r1", "R1");
-    input.text += "\nrouter ospf 1";
+    input.text += "\nrouter bgp 65001";
     const result = parseCiscoTopology([input], metadata);
     assert.ok(result.topology);
     assert.strictEqual(result.topology.connections.length, 0);
