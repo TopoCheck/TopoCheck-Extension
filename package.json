@@ -1,0 +1,143 @@
+{
+  "name": "topocheck",
+  "displayName": "TopoCheck",
+  "description": "Network configuration learning and validation",
+  "version": "0.0.1",
+  "engines": {
+    "vscode": "^1.125.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onLanguage:topocheck",
+    "onCommand:topocheck.validate",
+    "onWebviewPanel:topocheck.topologyView"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "topocheck",
+        "aliases": [
+          "TopoCheck",
+          "Cisco Configuration"
+        ],
+        "extensions": [
+          ".cfg",
+          ".ios"
+        ]
+      }
+    ],
+    "commands": [
+      {
+        "command": "topocheck.helloWorld",
+        "title": "Hello World"
+      },
+      {
+        "command": "topocheck.validate",
+        "title": "Validate Current Configuration",
+        "category": "TopoCheck"
+      },
+      {
+        "command": "topocheck.topology.create",
+        "title": "Create Topology",
+        "category": "TopoCheck"
+      },
+      {
+        "command": "topocheck.topology.open",
+        "title": "Open Topology View",
+        "category": "TopoCheck",
+        "icon": "$(type-hierarchy)"
+      },
+      {
+        "command": "topocheck.topologyView.renameDevice",
+        "title": "Rename Device",
+        "category": "TopoCheck"
+      },
+      {
+        "command": "topocheck.topologyView.deleteDevice",
+        "title": "Delete Device",
+        "category": "TopoCheck"
+      },
+      {
+        "command": "topocheck.topologyView.configureDevice",
+        "title": "Configure Device…",
+        "category": "TopoCheck"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "topocheck.validate",
+          "when": "editorLangId == topocheck",
+          "group": "navigation"
+        }
+      ],
+      "webview/context": [
+        {
+          "command": "topocheck.topologyView.configureDevice",
+          "when": "webviewId == 'topocheck.topologyView' && webviewSection == 'device'",
+          "group": "1_device@1"
+        },
+        {
+          "command": "topocheck.topologyView.renameDevice",
+          "when": "webviewId == 'topocheck.topologyView' && webviewSection == 'device'",
+          "group": "1_device@2"
+        },
+        {
+          "command": "topocheck.topologyView.deleteDevice",
+          "when": "webviewId == 'topocheck.topologyView' && webviewSection == 'device'",
+          "group": "2_delete@1"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "topocheck.topologyView.renameDevice",
+          "when": "false"
+        },
+        {
+          "command": "topocheck.topologyView.deleteDevice",
+          "when": "false"
+        },
+        {
+          "command": "topocheck.topologyView.configureDevice",
+          "when": "false"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run package",
+    "compile": "npm run check-types && npm run lint && node esbuild.js",
+    "watch": "npm-run-all -p watch:*",
+    "watch:esbuild": "node esbuild.js --watch",
+    "watch:tsc": "tsc --noEmit --watch --project tsconfig.json",
+    "package": "npm run check-types && npm run lint && node esbuild.js --production",
+    "compile-tests": "tsc -p . --outDir out",
+    "watch-tests": "tsc -p . -w --outDir out",
+    "pretest": "npm run compile-tests && npm run compile && npm run lint",
+    "check-types": "tsc --noEmit && tsc --noEmit -p src/webview/tsconfig.json",
+    "lint": "eslint src",
+    "test": "vscode-test"
+  },
+  "devDependencies": {
+    "@types/mocha": "^10.0.10",
+    "@types/node": "^24.13.6",
+    "@types/vscode": "^1.125.0",
+    "@vscode/test-cli": "^0.0.15",
+    "@vscode/test-electron": "^3.0.0",
+    "esbuild": "^0.28.1",
+    "eslint": "^10.5.0",
+    "npm-run-all": "^4.1.5",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.61.1"
+  },
+  "overrides": {
+    "diff": "^8.0.4",
+    "serialize-javascript": "^7.0.6"
+  },
+  "allowScripts": {
+    "esbuild@0.28.2": true
+  }
+}
