@@ -13,6 +13,22 @@ function configuration(deviceId: string, hostname: string, ip = "10.0.0.1") {
 }
 
 suite("Cisco IOS topology model integration", () => {
+  test("collects diagnostics from subsequent devices after an earlier input failed", () => {
+    const first = configuration("r1", "R1", "999.0.0.1");
+    const second = configuration("r2", "R2");
+    second.text += "\nunsupported-command";
+    const third = configuration("r3", "R3", "10.0.0.999");
+    const result = parseCiscoTopology([first, second, third], metadata);
+    assert.strictEqual(result.topology, undefined);
+    assert.deepStrictEqual(result.diagnostics.map((d) => ({
+      deviceId: d.deviceId, line: d.line, severity: d.severity, command: d.command
+    })), [
+      { deviceId: "r1", line: 3, severity: "error", command: "ip address 999.0.0.1 255.255.255.0" },
+      { deviceId: "r2", line: 4, severity: "warning", command: "unsupported-command" },
+      { deviceId: "r3", line: 3, severity: "error", command: "ip address 10.0.0.999 255.255.255.0" }
+    ]);
+  });
+
   test("feeds parsed H1c objects directly into connections and analysis", () => {
     const result = parseCiscoTopology([
       configuration("r1", "R1"), configuration("r2", "R2")

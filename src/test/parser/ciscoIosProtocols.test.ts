@@ -20,6 +20,62 @@ function fixture(name: string, deviceType: DeviceType) {
 }
 
 suite("Cisco IOS supported configurations", () => {
+  test("assigns mixed interface and routing settings to their exact owners", () => {
+    const result = parse([
+      "hostname MixedRouter", "interface GigabitEthernet0/0", " description WAN",
+      " ip address 192.0.2.1 255.255.255.0", " shutdown",
+      "interface Loopback0", " description RouterIdentity",
+      " ip address 10.0.0.1 255.255.255.255", " no shutdown",
+      "router ospf 1", " router-id 10.0.0.1",
+      " network 192.0.2.0 0.0.0.255 area 0", " passive-interface Loopback0",
+      "router ospf 2", " router-id 10.0.0.2",
+      " network 10.0.0.0 0.255.255.255 area 2", " passive-interface default",
+      "ip route 0.0.0.0 0.0.0.0 192.0.2.254",
+      "interface GigabitEthernet0/0", " description UpdatedWAN"
+    ].join("\n"));
+    assert.deepStrictEqual(result.diagnostics, []);
+    assert.ok(result.device);
+    assert.deepStrictEqual(result.device.interfaces.map((item) => ({
+      name: item.name, description: item.description, ip: item.ipAddress,
+      mask: item.subnetMask, enabled: item.enabled
+    })), [
+      { name: "GigabitEthernet0/0", description: "UpdatedWAN", ip: "192.0.2.1", mask: "255.255.255.0", enabled: false },
+      { name: "Loopback0", description: "RouterIdentity", ip: "10.0.0.1", mask: "255.255.255.255", enabled: true }
+    ]);
+    const ospf = result.device.protocols.find((item) => item instanceof OspfProtocol);
+    const routes = result.device.protocols.find((item) => item instanceof StaticRouteProtocol);
+    assert.ok(ospf instanceof OspfProtocol && routes instanceof StaticRouteProtocol);
+    assert.strictEqual(result.device.protocols.length, 2);
+    assert.deepStrictEqual(ospf.processes, [
+      { processId: 1, routerId: "10.0.0.1", networks: [
+        { address: "192.0.2.0", wildcardMask: "0.0.0.255", area: "0" }
+      ], passiveInterfaceDefault: false, passiveInterfaces: { Loopback0: true } },
+      { processId: 2, routerId: "10.0.0.2", networks: [
+        { address: "10.0.0.0", wildcardMask: "0.255.255.255", area: "2" }
+      ], passiveInterfaceDefault: true, passiveInterfaces: {} }
+    ]);
+    assert.deepStrictEqual(routes.routes, [
+      { destination: "0.0.0.0", subnetMask: "0.0.0.0", nextHop: "192.0.2.254" }
+    ]);
+  });
+
+  test("keeps access and trunk settings isolated between interfaces", () => {
+    const result = parse([
+      "hostname SW1", "interface FastEthernet0/1", " switchport mode access",
+      " switchport access vlan 10", "interface GigabitEthernet0/1",
+      " switchport mode trunk", " switchport trunk native vlan 99",
+      " switchport trunk allowed vlan 10,20", "interface FastEthernet0/2",
+      " switchport mode access", " switchport access vlan 20",
+      "interface FastEthernet0/1", " no switchport"
+    ].join("\n"), DeviceType.Switch);
+    assert.deepStrictEqual(result.diagnostics, []);
+    assert.ok(result.device);
+    assert.deepStrictEqual(result.device.interfaces.map((item) => item.switchport), [
+      undefined, { mode: "trunk", nativeVlan: 99, allowedVlans: [10, 20] },
+      { mode: "access", accessVlan: 20 }
+    ]);
+  });
+
   test("parses basic router fixture", () => {
     const device = fixture("router-basic.cfg", DeviceType.Router);
     assert.strictEqual(device.hostname, "R1");
