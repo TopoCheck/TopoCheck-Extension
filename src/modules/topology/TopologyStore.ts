@@ -118,7 +118,13 @@ export class TopologyStore implements vscode.Disposable {
             );
         }
 
-        return migrateTopology(parsed);
+        const topology = migrateTopology(parsed);
+
+        if (this.ensureDeviceInterfaces(topology)) {
+            await this.persist(topology);
+        }
+
+        return topology;
     }
 
     async listTopologies(): Promise<Topology[]> {
@@ -173,13 +179,31 @@ export class TopologyStore implements vscode.Disposable {
                 ? this.normalizePosition(input.position)
                 : findFreeGridPosition(Object.values(topology.layout.devices));
 
+            
+const deviceId = randomUUID();
+
+const interfaceNames =
+    input.type === "router"
+        ? ["GigabitEthernet0/0", "GigabitEthernet0/1"]
+        : input.type === "switch"
+          ? Array.from(
+                { length: 8 },
+                (_, index) => `FastEthernet0/${index + 1}`
+            )
+          : ["eth0"];
+
             const newDevice: Device = {
-                id: randomUUID(),
+                id: deviceId,
                 topologyId,
                 label: input.label ?? hostname,
                 hostname,
                 type: input.type,
-                interfaces: [],
+                interfaces: interfaceNames.map((name) => ({
+                    id: randomUUID(),
+                    deviceId,
+                    name,
+                    status: "down",
+                })),
             };
 
             topology.devices.push(newDevice);
@@ -357,6 +381,9 @@ export class TopologyStore implements vscode.Disposable {
         interfaceAId: string,
         interfaceBId: string
     ): Promise<Connection> {
+        if (interfaceAId === interfaceBId) {
+            throw new Error("Ein Interface kann nicht mit sich selbst verbunden werden.");
+        }
         const connection = await this.withWriteLock(topologyId, async () => {
             const topology = await this.loadTopology(topologyId);
 
@@ -370,6 +397,22 @@ export class TopologyStore implements vscode.Disposable {
                     "Beide Interfaces müssen zu einem Gerät dieser Topology gehören."
                 );
             }
+
+            const deviceOfInterface = new Map(
+                topology.devices.flatMap((device) =>
+                    device.interfaces.map((iface) => [iface.id, device.id] as const)
+                )
+            );
+
+            if (
+                deviceOfInterface.get(interfaceAId) ===
+                deviceOfInterface.get(interfaceBId)
+            ) {
+                throw new Error(
+                    "Eine Verbindung muss zwei unterschiedliche Geräte verbinden."
+                );
+            }
+
 
             const isAlreadyConnected = topology.connections.some(
                 (existing) =>
@@ -461,6 +504,37 @@ export class TopologyStore implements vscode.Disposable {
         });
 
         return config;
+    }
+
+    private ensureDeviceInterfaces(topology: Topology): boolean {
+        let changed = false;
+
+        for (const device of topology.devices) {
+            if (device.interfaces.length > 0) {
+                continue;
+            }
+
+            const names =
+                device.type === "router"
+                    ? ["GigabitEthernet0/0", "GigabitEthernet0/1"]
+                    : device.type === "switch"
+                    ? Array.from(
+                            { length: 8 },
+                            (_, index) => `FastEthernet0/${index + 1}`
+                        )
+                    : ["eth0"];
+
+            device.interfaces = names.map((name) => ({
+                id: randomUUID(),
+                deviceId: device.id,
+                name,
+                status: "down",
+            }));
+
+            changed = true;
+        }
+
+        return changed;
     }
 
     //Intern

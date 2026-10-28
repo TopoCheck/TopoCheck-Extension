@@ -78,6 +78,29 @@ export function parseWebviewMessage(raw: unknown): WebviewToExtensionMessage | u
             }
             return undefined;
 
+        
+        case "addConnection":
+            if (
+                isId(message.interfaceAId) &&
+                isId(message.interfaceBId)
+            ) {
+                return {
+                    type: "addConnection",
+                    interfaceAId: message.interfaceAId,
+                    interfaceBId: message.interfaceBId,
+                };
+            }
+            return undefined;
+
+        case "removeConnection":
+            if (isId(message.connectionId)) {
+                return {
+                    type: "removeConnection",
+                    connectionId: message.connectionId,
+                };
+            }
+            return undefined;
+
         default:
             return undefined;
     }

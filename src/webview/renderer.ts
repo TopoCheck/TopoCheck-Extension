@@ -7,11 +7,11 @@ import { GRID_SIZE, Point } from "../shared/geometry";
 import type { Viewport } from "../shared/viewport";
 import { DEVICE_TYPE_LABEL, ICON_SIZE, iconHref } from "./icons";
 import { svgElement } from "./svg";
-import type { ViewModel } from "./viewModel";
+import type { ViewConnection, ViewModel } from "./viewModel";
 
 export const LABEL_MIN_ZOOM = 0.45;
 
-export const DEVICE_EXTENT = { left: 40, right: 40, top: 32, bottom: 50 };
+export const DEVICE_EXTENT = { left: 58, right: 58, top: 32, bottom: 60 };
 
 interface DeviceElement {
     group: SVGGElement;
@@ -23,8 +23,13 @@ interface DeviceElement {
 
 interface ConnectionElement {
     line: SVGLineElement;
+    labelA: SVGTextElement;
+    labelB: SVGTextElement;
     deviceA: string;
     deviceB: string;
+    interfaceAName: string;
+    interfaceBName: string;
+    laneOffset: number;
 }
 
 export class SceneRenderer {
@@ -228,28 +233,58 @@ export class SceneRenderer {
     }
 
     private syncConnections(model: ViewModel): void {
-        const wanted = new Set(model.connections.map((c) => c.id));
+        const wanted = new Set(model.connections.map((connection) => connection.id));
         for (const [id, element] of this.connections) {
             if (!wanted.has(id)) {
                 element.line.remove();
+                element.labelA.remove();
+                element.labelB.remove();
                 this.connections.delete(id);
             }
         }
 
         this.connectionsByDevice.clear();
+
+        // Jede Verbindung zwischen demselben Geräte-Paar bekommt eine eigene Spur.
+        const groups = new Map<string, ViewConnection[]>();
+        for (const connection of model.connections) {
+            const pairKey = [connection.deviceA, connection.deviceB].sort().join("::");
+            const group = groups.get(pairKey) ?? [];
+            group.push(connection);
+            groups.set(pairKey, group);
+        }
+
+        const offsets = new Map<string, number>();
+        for (const group of groups.values()) {
+            group.forEach((connection, index) => {
+                offsets.set(connection.id, (index - (group.length - 1) / 2) * 10);
+            });
+        }
+
         for (const connection of model.connections) {
             let element = this.connections.get(connection.id);
             if (!element) {
                 element = {
                     line: svgElement("line", { class: "connection" }),
+                    labelA: svgElement("text", { class: "connection-label", "text-anchor": "start" }),
+                    labelB: svgElement("text", { class: "connection-label", "text-anchor": "end" }),
                     deviceA: connection.deviceA,
                     deviceB: connection.deviceB,
+                    interfaceAName: connection.interfaceAName,
+                    interfaceBName: connection.interfaceBName,
+                    laneOffset: 0,
                 };
                 this.connections.set(connection.id, element);
-                this.connectionLayer.append(element.line);
+                this.connectionLayer.append(element.line, element.labelA, element.labelB);
             }
+
             element.deviceA = connection.deviceA;
             element.deviceB = connection.deviceB;
+            element.interfaceAName = connection.interfaceAName;
+            element.interfaceBName = connection.interfaceBName;
+            element.laneOffset = offsets.get(connection.id) ?? 0;
+            element.labelA.textContent = abbreviateInterface(connection.interfaceAName);
+            element.labelB.textContent = abbreviateInterface(connection.interfaceBName);
 
             for (const deviceId of [connection.deviceA, connection.deviceB]) {
                 let set = this.connectionsByDevice.get(deviceId);
@@ -273,11 +308,60 @@ export class SceneRenderer {
         if (!a || !b) {
             return;
         }
-        element.line.setAttribute("x1", String(a.x));
-        element.line.setAttribute("y1", String(a.y));
-        element.line.setAttribute("x2", String(b.x));
-        element.line.setAttribute("y2", String(b.y));
+
+        const dx = b.x - a.x;
+        const dy = b.y - a.y;
+        const length = Math.max(1, Math.hypot(dx, dy));
+        const ux = dx / length;
+        const uy = dy / length;
+
+        // Einheitliche Normale anhand der alphabetisch kanonischen Richtung:
+        // auch bei umgekehrter Reihenfolge der Endpunkte bleiben parallele Kabel getrennt.
+        const canonicalForward = element.deviceA.localeCompare(element.deviceB) <= 0;
+        const nx = (canonicalForward ? -uy : uy);
+        const ny = (canonicalForward ? ux : -ux);
+        const offsetX = nx * element.laneOffset;
+        const offsetY = ny * element.laneOffset;
+
+        element.line.setAttribute("x1", String(a.x + offsetX));
+        element.line.setAttribute("y1", String(a.y + offsetY));
+        element.line.setAttribute("x2", String(b.x + offsetX));
+        element.line.setAttribute("y2", String(b.y + offsetY));
+
+        const endpointDistance = Math.min(ICON_SIZE / 2 + 9, length * 0.25);
+        const labelOffset = element.laneOffset + 5;
+
+        element.labelA.setAttribute("x", String(a.x + ux * endpointDistance + nx * labelOffset));
+        element.labelA.setAttribute("y", String(a.y + uy * endpointDistance + ny * labelOffset));
+        element.labelB.setAttribute("x", String(b.x - ux * endpointDistance + nx * labelOffset));
+        element.labelB.setAttribute("y", String(b.y - uy * endpointDistance + ny * labelOffset));
+
+        element.labelA.setAttribute("text-anchor", dx >= 0 ? "start" : "end");
+        element.labelB.setAttribute("text-anchor", dx >= 0 ? "end" : "start");
     }
+}
+
+export function abbreviateInterface(name: string): string {
+    const knownPrefixes: Array<[string, string]> = [
+        ["GigabitEthernet", "Gi"],
+        ["FastEthernet", "Fa"],
+        ["TenGigabitEthernet", "Te"],
+        ["TwentyFiveGigE", "Twe"],
+        ["FortyGigabitEthernet", "Fo"],
+        ["HundredGigE", "Hu"],
+        ["Ethernet", "Eth"],
+        ["Serial", "Se"],
+        ["Loopback", "Lo"],
+        ["Port-channel", "Po"],
+        ["PortChannel", "Po"],
+    ];
+
+    for (const [prefix, shortPrefix] of knownPrefixes) {
+        if (name.startsWith(prefix)) {
+            return shortPrefix + name.slice(prefix.length);
+        }
+    }
+    return name;
 }
 
 function createSelectionOutlineFilter(): SVGFilterElement {
