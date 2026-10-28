@@ -36,81 +36,49 @@ docs/
     `-- network-data-model.md    UML-Klassendiagramm
 ```
 
-## Internes Datenmodell
+* Visual Studio Code 1.125.0 or later
 
 `NetworkTopology` ist der zentrale Einstiegspunkt des Modells. Eine Topologie
 enthält `NetworkDevice`- und `NetworkConnection`-Objekte. Geräte verwalten ihre
 `NetworkInterface`- und `NetworkProtocol`-Objekte.
 
-Das Modell stellt unter anderem folgende Regeln sicher:
-
-- eindeutige Geräte-, Interface-, Protokoll- und Verbindungs-IDs
-- eindeutige Interface-Namen pro Gerät
-- nur unterstützte Protokolle je Gerätetyp
-- Verbindungen nur zwischen vorhandenen Geräten und Interfaces
-- maximal eine physische Verbindung pro Interface
-- automatisches Entfernen von Verbindungen beim Löschen eines Geräts
-
-Das vollständige Klassendiagramm befindet sich unter
-[`docs/uml/network-data-model.md`](docs/uml/network-data-model.md).
-
-## Topologieanalyse
+TopoCheck currently does not provide any additional VS Code settings.
 
 Der Analyzer arbeitet unabhängig von der VS-Code-API und nimmt echte
 `NetworkTopology`-Objekte entgegen:
 
-```ts
-const issues = analyzeTopology(topology);
-```
+TopoCheck is currently in development. Some planned features and networking technologies are not yet fully implemented.
 
-Er liefert strukturierte `TopologyIssue`-Objekte. Dadurch kann er später vom
-Parser, einem Konfigurationsgenerator oder der grafischen Oberfläche verwendet
-werden. Eine direkte Verbindung zwischen `.cfg`-Dateien und dem Analyzer wird
-erst mit dem geplanten Parser hergestellt.
+## Planned Technologies
 
-## Entwicklung
+The project is planned to support networking technologies and protocols such as:
 
-Voraussetzungen:
+* RIP
+* OSPF
+* VLAN
+* STP
+* DHCP
+* DNS
+* NTP
+* ACL
 
-- Node.js und npm
-- Visual Studio Code
-- die in `.vscode/extensions.json` empfohlenen Erweiterungen
+## Project
 
-Abhängigkeiten installieren:
+TopoCheck is developed as a diploma project at **HTL Wien 3 Rennweg** in Vienna, Austria.
 
-```bash
-npm install
-```
+The project focuses on creating a visual and educational environment for learning computer networking and understanding configuration errors.
 
-Qualitätsprüfungen ausführen:
+## Links
 
-```bash
-npm run check-types
-npm run lint
-npm test
-```
+* Website: https://topocheck.dev/
+* Repository: https://github.com/TopoCheck/TopoCheck-Extension
 
-Mit `F5` wird ein neues Fenster als Extension Development Host geöffnet. Dort
-können die Dateien unter `test-workspace/` zum manuellen Testen verwendet
-werden.
+## Release Notes
 
-## Testdateien
+### 0.0.1
 
-- `test-workspace/valid-router.cfg` enthält eine gültige Beispielkonfiguration.
-- `test-workspace/invalid-router.cfg` enthält absichtlich einen fehlenden
-  Hostnamen, eine fehlende Subnetzmaske und einen unbekannten Befehl.
+Initial development version of TopoCheck.
 
-## Dokumentation
+---
 
-- [Modellierungsplanung](docs/modeling/README.md)
-- [Implementierungsplan](docs/modeling/implementation-plan.md)
-- [Testplan](docs/modeling/test-plan.md)
-- [UML-Klassendiagramm](docs/uml/network-data-model.md)
-
-## Bekannte Einschränkungen
-
-- Der Konfigurationsvalidator unterstützt nur wenige grundlegende Befehle.
-- Das Datenmodell unterstützt derzeit IPv4, aber noch kein IPv6.
-- Der TopologieAnalyzer ist noch nicht mit dem `.cfg`-Parser oder der
-  VS-Code-Diagnoseanzeige verbunden.
-- Layer-3-Switches werden in der ersten Modellversion nicht gesondert behandelt.
+**TopoCheck – Understand networks. Spot errors instantly.**
