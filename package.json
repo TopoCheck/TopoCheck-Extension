@@ -21,6 +21,12 @@
     "vscode": "^1.125.0"
   },
   "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onLanguage:topocheck",
+    "onCommand:topocheck.validate",
+    "onCommand:topocheck.previewParser"
     "Education"
   ],
   "main": "./dist/extension.js",
@@ -38,6 +44,15 @@
       }
     ],
     "commands": [
+      {
+        "command": "topocheck.previewParser",
+        "title": "Parser testen (H1e)",
+        "category": "TopoCheck"
+      },
+      {
+        "command": "topocheck.helloWorld",
+        "title": "Hello World"
+      },
       {
         "command": "topocheck.validate",
         "title": "Validate Current Configuration",
