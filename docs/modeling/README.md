@@ -128,8 +128,12 @@ Geräte nicht kopiert und Verbindungen bleiben serialisierbar.
 
 ### NetworkProtocol
 
-Das gemeinsame Grundmodell enthält `id`, `type` und `enabled`. Spezifische
-Einstellungen für OSPF, RIP, VLAN usw. werden später als eigene Typen ergänzt.
+Das gemeinsame Grundmodell enthält `id`, `type` und `enabled`. H1e ergänzt
+`VlanProtocol` (VLAN-IDs und Namen), `StaticRouteProtocol` (Netz, Maske,
+Next-Hop, Ausgangsinterface, administrative Distanz) und `OspfProtocol`
+(Prozesse, Router-IDs, Netzwerke, Areas und Passive-Interface-Einstellungen)
+als Unterklassen. `NetworkInterface` besitzt außerdem die optionalen Felder
+`description` und `switchport`. Details und Syntaxumfang: [Parser](../parser.md).
 
 ## Konsistenzregeln
 

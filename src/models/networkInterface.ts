@@ -1,9 +1,12 @@
 import { InterfaceType } from "./interfaceType";
+import { SwitchportConfiguration } from "./ciscoProtocols";
 
 export interface NetworkInterfaceData {
   id: string;
   name: string;
   type: InterfaceType;
+  description?: string;
+  switchport?: SwitchportConfiguration;
   enabled?: boolean;
   ipAddress?: string;
   subnetMask?: string;
@@ -14,6 +17,8 @@ export class NetworkInterface {
   public readonly id: string;
   public readonly name: string;
   public readonly type: InterfaceType;
+  public description: string | undefined;
+  public switchport: SwitchportConfiguration | undefined;
   public enabled: boolean;
   public ipAddress: string | undefined;
   public subnetMask: string | undefined;
@@ -22,6 +27,11 @@ export class NetworkInterface {
     this.id = requireNonEmpty(data.id, "Interface ID");
     this.name = requireNonEmpty(data.name, "Interface name");
     this.type = data.type;
+    this.description = data.description;
+    this.switchport = data.switchport === undefined ? undefined : {
+      ...data.switchport,
+      allowedVlans: data.switchport.allowedVlans?.slice()
+    };
     this.enabled = data.enabled ?? true;
 
     if (data.ipAddress === undefined && data.subnetMask === undefined) {

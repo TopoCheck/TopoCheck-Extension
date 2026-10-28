@@ -1,26 +1,37 @@
 import * as vscode from "vscode";
 import { validateConfiguration } from "./validation/configValidator";
+import { registerParserPreview } from "./commands/previewParser";
+import { DeviceType } from "./models";
 
 export function activate(context: vscode.ExtensionContext): void {
+  const deviceTypes = new Map<string, DeviceType>();
   const diagnostics =
     vscode.languages.createDiagnosticCollection("topocheck");
 
   context.subscriptions.push(diagnostics);
 
   function validateDocument(document: vscode.TextDocument): void {
-    if (document.languageId !== "topocheck") {
+    if (document.languageId !== "topocheck" && !/\.(cfg|ios)$/i.test(document.fileName)) {
       return;
     }
 
     diagnostics.set(
       document.uri,
-      validateConfiguration(document)
+      validateConfiguration(document, {
+        deviceId: document.uri.toString(),
+        deviceType: deviceTypes.get(document.uri.toString()) ?? DeviceType.Router
+      })
     );
   }
 
+  registerParserPreview(context, (document, type) => {
+    deviceTypes.set(document.uri.toString(), type);
+    validateDocument(document);
+  });
+
   const validateCommand = vscode.commands.registerCommand(
     "topocheck.validate",
-    () => {
+    async () => {
       const editor = vscode.window.activeTextEditor;
 
       if (!editor) {
@@ -30,10 +41,23 @@ export function activate(context: vscode.ExtensionContext): void {
         return;
       }
 
+      if (editor.document.languageId !== "topocheck" && !/\.(cfg|ios)$/i.test(editor.document.fileName)) {
+        await vscode.window.showWarningMessage("TopoCheck: Öffne eine .cfg- oder .ios-Datei.");
+        return;
+      }
+      const selection = await vscode.window.showQuickPick([
+        { label: "Router", type: DeviceType.Router },
+        { label: "Switch", type: DeviceType.Switch }
+      ], { title: "TopoCheck: Gerätetyp für die Validierung" });
+      if (!selection || editor.document.isClosed) {
+        return;
+      }
+      deviceTypes.set(editor.document.uri.toString(), selection.type);
+
       validateDocument(editor.document);
 
       vscode.window.showInformationMessage(
-        "TopoCheck: Konfiguration wurde geprüft."
+        "TopoCheck: Parser-Prüfung abgeschlossen. Meldungen stehen unter Probleme."
       );
     }
   );
@@ -48,11 +72,14 @@ export function activate(context: vscode.ExtensionContext): void {
     });
 
   const closeListener = vscode.workspace.onDidCloseTextDocument(
-    (document) => diagnostics.delete(document.uri)
+    (document) => {
+      diagnostics.delete(document.uri);
+      deviceTypes.delete(document.uri.toString());
+    }
   );
 
-  if (vscode.window.activeTextEditor) {
-    validateDocument(vscode.window.activeTextEditor.document);
+  for (const document of vscode.workspace.textDocuments) {
+    validateDocument(document);
   }
 
   context.subscriptions.push(

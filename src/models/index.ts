@@ -7,3 +7,4 @@ export * from "./networkInterface";
 export * from "./networkProtocol";
 export * from "./networkTopology";
 export * from "./protocolType";
+export * from "./ciscoProtocols";
