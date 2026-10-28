@@ -250,6 +250,21 @@ export class TopologyViewPanel implements vscode.Disposable {
             case "openDevice":
                 await this.openDevice(message.deviceId);
                 return;
+            
+            case "addConnection":
+                await this.store.addConnection(
+                    this.topologyId,
+                    message.interfaceAId,
+                    message.interfaceBId
+                );
+                return;
+
+            case "removeConnection":
+                await this.store.removeConnection(
+                    this.topologyId,
+                    message.connectionId
+                );
+                return;
         }
     }
 

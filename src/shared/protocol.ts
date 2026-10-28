@@ -19,6 +19,7 @@ export interface DeviceMoveMessage {
     position: Point;
 }
 
+
 /** Webview -> Extension */
 export type WebviewToExtensionMessage =
     | { type: "ready" }
@@ -26,7 +27,14 @@ export type WebviewToExtensionMessage =
     | { type: "moveDevices"; moves: DeviceMoveMessage[] }
     | { type: "deleteDevice"; deviceId: string }
     | { type: "renameDevice"; deviceId: string }
-    | { type: "openDevice"; deviceId: string };
+    | { type: "openDevice"; deviceId: string }
+    | {
+          type: "addConnection";
+          interfaceAId: string;
+          interfaceBId: string;
+      }
+    | { type: "removeConnection"; connectionId: string };
+
 
 /** Extension -> Webview */
 export type ExtensionToWebviewMessage = {
