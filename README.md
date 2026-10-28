@@ -1,71 +1,84 @@
-# topocheck README
+# TopoCheck
 
-This is the README for your extension "topocheck". After writing up a brief description, we recommend including the following sections.
+TopoCheck ist eine Visual-Studio-Code-Extension zum Lernen und Prüfen von
+Netzwerkkonfigurationen. Cisco-Konfigurationsdateien mit den Endungen `.cfg`
+und `.ios` werden als eigener Dateityp erkannt und während der Bearbeitung
+validiert.
 
-## Features
+## Aktuelle Funktionen
 
-Describe specific features of your extension including screenshots of your extension in action. Image paths are relative to this README file.
+- Registrierung von `.cfg`- und `.ios`-Dateien als Sprache `topocheck`
+- Validierung beim Öffnen und Ändern einer Konfigurationsdatei
+- manueller Befehl `TopoCheck: Validate Current Configuration`
+- VS-Code-Diagnosen für ungültige oder unbekannte Befehle
+- internes Datenmodell für Geräte, Interfaces, Verbindungen und Protokolle
+- Topologieanalyse für fehlende Interfaces, unverbundene Geräte,
+  unvollständige IP-Konfigurationen und doppelte IPv4-Adressen
 
-For example if there is an image subfolder under your extension project workspace:
+Der aktuelle Konfigurationsvalidator ist bewusst ein einfacher Prototyp und
+noch kein vollständiger Cisco-IOS-Parser.
 
-\!\[feature X\]\(images/feature-x.png\)
+## Projektstruktur
 
-> Tip: Many popular extensions utilize animations. This is an excellent way to show off your extension! We recommend short, focused animations that are easy to follow.
+```text
+src/
+|-- extension.ts                 Aktivierung und VS-Code-Integration
+|-- validation/
+|   `-- configValidator.ts       Zeilenbasierte Konfigurationsprüfung
+|-- models/                      Internes Netzwerk-Datenmodell
+|-- analysis/
+|   `-- topologyAnalyzer.ts      Analyse von NetworkTopology-Objekten
+`-- test/                        Unit- und Integrationstests
 
-## Requirements
+docs/
+|-- modeling/                    Planung, Regeln und Testplan für H1.c
+`-- uml/
+    `-- network-data-model.md    UML-Klassendiagramm
+```
 
-If you have any requirements or dependencies, add a section describing those and how to install and configure them.
+* Visual Studio Code 1.125.0 or later
 
-## Extension Settings
+`NetworkTopology` ist der zentrale Einstiegspunkt des Modells. Eine Topologie
+enthält `NetworkDevice`- und `NetworkConnection`-Objekte. Geräte verwalten ihre
+`NetworkInterface`- und `NetworkProtocol`-Objekte.
 
-Include if your extension adds any VS Code settings through the `contributes.configuration` extension point.
+TopoCheck currently does not provide any additional VS Code settings.
 
-For example:
+Der Analyzer arbeitet unabhängig von der VS-Code-API und nimmt echte
+`NetworkTopology`-Objekte entgegen:
 
-This extension contributes the following settings:
+TopoCheck is currently in development. Some planned features and networking technologies are not yet fully implemented.
 
-* `myExtension.enable`: Enable/disable this extension.
-* `myExtension.thing`: Set to `blah` to do something.
+## Planned Technologies
 
-## Known Issues
+The project is planned to support networking technologies and protocols such as:
 
-Calling out known issues can help limit users opening duplicate issues against your extension.
+* RIP
+* OSPF
+* VLAN
+* STP
+* DHCP
+* DNS
+* NTP
+* ACL
+
+## Project
+
+TopoCheck is developed as a diploma project at **HTL Wien 3 Rennweg** in Vienna, Austria.
+
+The project focuses on creating a visual and educational environment for learning computer networking and understanding configuration errors.
+
+## Links
+
+* Website: https://topocheck.dev/
+* Repository: https://github.com/TopoCheck/TopoCheck-Extension
 
 ## Release Notes
 
-Users appreciate release notes as you update your extension.
+### 0.0.1
 
-### 1.0.0
-
-Initial release of ...
-
-### 1.0.1
-
-Fixed issue #.
-
-### 1.1.0
-
-Added features X, Y, and Z.
+Initial development version of TopoCheck.
 
 ---
 
-## Following extension guidelines
-
-Ensure that you've read through the extensions guidelines and follow the best practices for creating your extension.
-
-* [Extension Guidelines](https://code.visualstudio.com/api/references/extension-guidelines)
-
-## Working with Markdown
-
-You can author your README using Visual Studio Code. Here are some useful editor keyboard shortcuts:
-
-* Split the editor (`Cmd+\` on macOS or `Ctrl+\` on Windows and Linux).
-* Toggle preview (`Shift+Cmd+V` on macOS or `Shift+Ctrl+V` on Windows and Linux).
-* Press `Ctrl+Space` (Windows, Linux, macOS) to see a list of Markdown snippets.
-
-## For more information
-
-* [Visual Studio Code's Markdown Support](http://code.visualstudio.com/docs/languages/markdown)
-* [Markdown Syntax Reference](https://help.github.com/articles/markdown-basics/)
-
-**Enjoy!**
+**TopoCheck – Understand networks. Spot errors instantly.**
