@@ -214,4 +214,290 @@ suite("TopologyStore Test Suite", () => {
             store.addConnection(topology.id, ifaceA.id, ifaceC.id)
         );
     });
+
+    
+    // Verkabelungs- und Verbindungstests
+
+    test("1. Eine gültige Verbindung zwischen zwei Geräten wird akzeptiert", async () => {
+        const topology = await store.createTopology("Gueltige Verbindung");
+
+        const router = await store.addDevice(topology.id, {
+            label: "R1",
+            hostname: "R1",
+            type: "router",
+        });
+        const switchDevice = await store.addDevice(topology.id, {
+            label: "SW1",
+            hostname: "SW1",
+            type: "switch",
+        });
+
+        const routerInterface = router.interfaces[0];
+        const switchInterface = switchDevice.interfaces[0];
+
+        const connection = await store.addConnection(
+            topology.id,
+            routerInterface.id,
+            switchInterface.id
+        );
+
+        const loaded = await store.loadTopology(topology.id);
+
+        assert.strictEqual(loaded.connections.length, 1);
+        assert.strictEqual(connection.interfaceAId, routerInterface.id);
+        assert.strictEqual(connection.interfaceBId, switchInterface.id);
+        assert.strictEqual(loaded.connections[0].id, connection.id);
+    });
+
+    test("2. Eine Verbindung mit einem unbekannten Interface wird zurückgewiesen", async () => {
+        const topology = await store.createTopology("Unbekanntes Interface");
+
+        const router = await store.addDevice(topology.id, {
+            label: "R1",
+            hostname: "R1",
+            type: "router",
+        });
+        const switchDevice = await store.addDevice(topology.id, {
+            label: "SW1",
+            hostname: "SW1",
+            type: "switch",
+        });
+
+        await assert.rejects(
+            () =>
+                store.addConnection(
+                    topology.id,
+                    router.interfaces[0].id,
+                    "unbekannte-interface-id"
+                ),
+            /Interfaces müssen zu einem Gerät dieser Topology gehören/
+        );
+
+        // Auch bei einer abgewiesenen Verbindung darf nichts gespeichert werden.
+        const loaded = await store.loadTopology(topology.id);
+        assert.strictEqual(loaded.connections.length, 0);
+    });
+
+    test("3. Eine Verbindung zwischen zwei Interfaces desselben Geräts wird zurückgewiesen", async () => {
+        const topology = await store.createTopology("Gleiches Gerät");
+
+        const router = await store.addDevice(topology.id, {
+            label: "R1",
+            hostname: "R1",
+            type: "router",
+        });
+
+        await assert.rejects(
+            () =>
+                store.addConnection(
+                    topology.id,
+                    router.interfaces[0].id,
+                    router.interfaces[1].id
+                ),
+            /zwei unterschiedliche Geräte verbinden/
+        );
+
+        const loaded = await store.loadTopology(topology.id);
+        assert.strictEqual(loaded.connections.length, 0);
+    });
+
+    test("4. Eine Verbindung über ein bereits belegtes Interface wird zurückgewiesen", async () => {
+        const topology = await store.createTopology("Belegtes Interface");
+
+        const router = await store.addDevice(topology.id, {
+            label: "R1",
+            hostname: "R1",
+            type: "router",
+        });
+        const switchDevice = await store.addDevice(topology.id, {
+            label: "SW1",
+            hostname: "SW1",
+            type: "switch",
+        });
+        const pc = await store.addDevice(topology.id, {
+            label: "PC1",
+            hostname: "PC1",
+            type: "pc",
+        });
+
+        const routerInterface = router.interfaces[0];
+        const switchInterface = switchDevice.interfaces[0];
+        const pcInterface = pc.interfaces[0];
+
+        await store.addConnection(
+            topology.id,
+            routerInterface.id,
+            switchInterface.id
+        );
+
+        await assert.rejects(
+            () =>
+                store.addConnection(
+                    topology.id,
+                    routerInterface.id,
+                    pcInterface.id
+                ),
+            /bereits verbunden/
+        );
+
+        const loaded = await store.loadTopology(topology.id);
+        assert.strictEqual(loaded.connections.length, 1);
+    });
+
+    test("5. Eine gültige Verbindung kann entfernt werden", async () => {
+        const topology = await store.createTopology("Verbindung entfernen");
+
+        const router = await store.addDevice(topology.id, {
+            label: "R1",
+            hostname: "R1",
+            type: "router",
+        });
+        const switchDevice = await store.addDevice(topology.id, {
+            label: "SW1",
+            hostname: "SW1",
+            type: "switch",
+        });
+
+        const connection = await store.addConnection(
+            topology.id,
+            router.interfaces[0].id,
+            switchDevice.interfaces[0].id
+        );
+
+        await store.removeConnection(topology.id, connection.id);
+
+        const loaded = await store.loadTopology(topology.id);
+        assert.strictEqual(
+            loaded.connections.some((item) => item.id === connection.id),
+            false
+        );
+        assert.strictEqual(loaded.connections.length, 0);
+    });
+
+    test("6. Nach dem Entfernen einer Verbindung sind beide Interfaces wieder frei", async () => {
+        const topology = await store.createTopology("Interfaces wieder frei");
+
+        const router = await store.addDevice(topology.id, {
+            label: "R1",
+            hostname: "R1",
+            type: "router",
+        });
+        const switchDevice = await store.addDevice(topology.id, {
+            label: "SW1",
+            hostname: "SW1",
+            type: "switch",
+        });
+        const pc = await store.addDevice(topology.id, {
+            label: "PC1",
+            hostname: "PC1",
+            type: "pc",
+        });
+
+        const routerInterface = router.interfaces[0];
+        const switchInterface = switchDevice.interfaces[0];
+        const pcInterface = pc.interfaces[0];
+
+        const connection = await store.addConnection(
+            topology.id,
+            routerInterface.id,
+            switchInterface.id
+        );
+
+        await store.removeConnection(topology.id, connection.id);
+
+        // Beide zuvor belegten Interfaces müssen erneut verwendbar sein.
+        const replacementConnection = await store.addConnection(
+            topology.id,
+            routerInterface.id,
+            pcInterface.id
+        );
+
+        const loaded = await store.loadTopology(topology.id);
+
+        assert.strictEqual(loaded.connections.length, 1);
+        assert.strictEqual(
+            loaded.connections[0].id,
+            replacementConnection.id
+        );
+        assert.strictEqual(
+            loaded.connections[0].interfaceAId,
+            routerInterface.id
+        );
+        assert.strictEqual(
+            loaded.connections[0].interfaceBId,
+            pcInterface.id
+        );
+
+        
+        // Das Switch-Interface muss ebenfalls wieder verwendbar sein.
+        const secondConnection = await store.addConnection(
+            topology.id,
+            switchInterface.id,
+            router.interfaces[1].id
+        );
+
+        const finalTopology = await store.loadTopology(topology.id);
+
+        assert.strictEqual(finalTopology.connections.length, 2);
+        assert.strictEqual(
+            finalTopology.connections.some(
+                (item) => item.id === secondConnection.id
+            ),
+            true
+        );
+    });
+
+    test("7. Die automatische Interface-Ausstattung der Gerätetypen ist korrekt", async () => {
+        const topology = await store.createTopology("Interface-Ausstattung");
+
+
+        const router = await store.addDevice(topology.id, {
+            label: "R1",
+            hostname: "R1",
+            type: "router",
+        });
+        const switchDevice = await store.addDevice(topology.id, {
+            label: "SW1",
+            hostname: "SW1",
+            type: "switch",
+        });
+        const pc = await store.addDevice(topology.id, {
+            label: "PC1",
+            hostname: "PC1",
+            type: "pc",
+        });
+
+        assert.deepStrictEqual(
+            router.interfaces.map((iface) => iface.name),
+            ["GigabitEthernet0/0", "GigabitEthernet0/1"]
+        );
+
+        assert.deepStrictEqual(
+            switchDevice.interfaces.map((iface) => iface.name),
+            Array.from(
+                { length: 8 },
+                (_, index) => `FastEthernet0/${index + 1}`
+            )
+        );
+
+        assert.deepStrictEqual(
+            pc.interfaces.map((iface) => iface.name),
+            ["eth0"]
+        );
+
+        // Jedes Interface muss zum jeweiligen Gerät gehören und eine eigene ID haben.
+        for (const device of [router, switchDevice, pc]) {
+            assert.strictEqual(
+                device.interfaces.every(
+                    (iface) => iface.deviceId === device.id
+                ),
+                true
+            );
+
+            assert.strictEqual(
+                new Set(device.interfaces.map((iface) => iface.id)).size,
+                device.interfaces.length
+            );
+        }
+    });
 });

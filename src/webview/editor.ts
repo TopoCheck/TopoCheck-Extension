@@ -65,6 +65,10 @@ type Gesture =
 export class TopologyEditor {
     private readonly renderer: SceneRenderer;
     private readonly canvas: HTMLElement;
+    private readonly interfacePanel: HTMLElement;
+    private readonly interfaceASelect: HTMLSelectElement;
+    private readonly interfaceBSelect: HTMLSelectElement;
+    private readonly connectionList: HTMLElement;
     private readonly emptyState: HTMLElement;
     private readonly hint: HTMLElement;
     private readonly nameLabel: HTMLElement;
@@ -93,6 +97,19 @@ export class TopologyEditor {
     private readonly viewState: TopologyViewState;
     private readonly viewportListeners: ((viewport: Viewport) => void)[] = [];
     private readonly modelListeners: (() => void)[] = [];
+    private readonly interfacePopup: HTMLElement;
+
+    private readonly cableButton: HTMLButtonElement;
+    private readonly connectButton: HTMLButtonElement;
+
+    private cableMode = false;
+    private cableFirstDeviceId: string | undefined;
+    private cableFirstInterfaceId: string | undefined;
+    private cableSecondDeviceId: string | undefined;
+    private cableSecondInterfaceId: string | undefined;
+
+    private readonly interfaceOverview: HTMLElement;
+    private readonly interfacePanelToggle: HTMLButtonElement;
 
     constructor(root: HTMLElement, topologyId: string) {
         const saved = vscodeApi.getState();
@@ -111,6 +128,23 @@ export class TopologyEditor {
             this.paletteButtons.set(type, button);
             palette.append(button);
         }
+
+        this.cableButton = htmlElement("button", "palette-item cable-tool");
+        this.cableButton.type = "button";
+        this.cableButton.title = "Zwei Geräte über freie Interfaces verbinden";
+        this.cableButton.setAttribute("aria-label", "Verkabeln");
+        this.cableButton.setAttribute("aria-pressed", "false");
+
+        const cableIcon = htmlElement("span", "cable-icon");
+        cableIcon.setAttribute("aria-hidden", "true");
+        this.cableButton.append(
+            cableIcon,
+            htmlElement("span", "palette-label", "Verkabeln")
+        );
+        this.cableButton.addEventListener("click", () => {
+            this.setCableMode(!this.cableMode);
+        });
+        palette.append(this.cableButton);
         this.nameLabel = htmlElement("span", "topology-name");
         toolbar.append(palette, htmlElement("div", "toolbar-spacer"), this.nameLabel);
 
@@ -127,6 +161,11 @@ export class TopologyEditor {
         this.hint = htmlElement("div", "hint");
         this.hint.setAttribute("role", "status");
 
+        this.interfacePopup = htmlElement("div", "interface-popup");
+        this.interfacePopup.hidden = true;
+        this.interfacePopup.setAttribute("role", "dialog");
+        this.interfacePopup.setAttribute("aria-label", "Interface auswählen");
+
         this.corner = htmlElement("div", "corner");
         const zoomControls = htmlElement("div", "zoom-controls");
         zoomControls.setAttribute("role", "group");
@@ -139,8 +178,140 @@ export class TopologyEditor {
         zoomControls.append(zoomOut, this.zoomLabel, zoomIn, fit);
         this.corner.append(zoomControls);
 
-        this.canvas.append(this.emptyState, this.hint, this.corner);
-        root.append(toolbar, this.canvas);
+                
+        this.canvas.append(
+            this.emptyState,
+            this.hint,
+            this.corner,
+            this.interfacePopup
+        );
+        
+        // Interface-Panel
+        this.interfacePanel = htmlElement("aside", "interface-panel");
+        const panelTitle = htmlElement("h2", "interface-panel-title", "Interfaces");
+
+        const connectTitle = htmlElement("h3", "interface-section-title", "Verbindung erstellen");
+
+        this.interfaceASelect = document.createElement("select");
+        this.interfaceASelect.className = "interface-select";
+        this.interfaceASelect.setAttribute("aria-label", "Erstes Interface");
+
+        this.interfaceBSelect = document.createElement("select");
+        this.interfaceBSelect.className = "interface-select";
+        this.interfaceBSelect.setAttribute("aria-label", "Zweites Interface");
+
+        this.connectButton = htmlElement(
+            "button",
+            "interface-action",
+            "Verbindung erstellen"
+        );
+        this.connectButton.type = "button";
+        this.connectButton.disabled = true;
+
+        // Interface-Auswahl erfolgt künftig über das Popup am Gerät.
+        connectTitle.hidden = true;
+        this.interfaceASelect.hidden = true;
+        this.interfaceBSelect.hidden = true;
+        this.connectButton.hidden = true;
+
+        this.interfaceASelect.addEventListener("change", () => {
+            this.cableFirstInterfaceId = this.interfaceASelect.value || undefined;
+
+            if (this.cableFirstInterfaceId) {
+                this.showHint("Klicke jetzt das zweite Gerät an.");
+            } else {
+                this.showHint("Wähle das erste Interface aus.");
+            }
+
+            this.renderInterfacePanel();
+        });
+
+        this.interfaceBSelect.addEventListener("change", () => {
+            this.cableSecondInterfaceId = this.interfaceBSelect.value || undefined;
+
+            if (this.cableSecondInterfaceId) {
+                this.showHint("Klicke auf „Verbindung erstellen“.");
+            } else {
+                this.showHint("Wähle das zweite Interface aus.");
+            }
+
+            this.renderInterfacePanel();
+        });
+
+        this.connectButton.type = "button";
+        this.connectButton.addEventListener("click", () => {
+            const interfaceAId = this.cableFirstInterfaceId;
+            const interfaceBId = this.cableSecondInterfaceId;
+
+            if (!interfaceAId || !interfaceBId) {
+                this.showHint("Wähle beide Interfaces aus.");
+                return;
+            }
+
+            if (this.cableFirstDeviceId === this.cableSecondDeviceId) {
+                this.showHint("Wähle zwei unterschiedliche Geräte.");
+                return;
+            }
+
+            vscodeApi.postMessage({
+                type: "addConnection",
+                interfaceAId,
+                interfaceBId,
+            });
+
+            this.setCableMode(false);
+        });
+
+        const connectionsTitle = htmlElement("h3", "interface-section-title", "Verbindungen");
+        this.connectionList = htmlElement("div", "connection-list");
+        this.interfaceOverview = htmlElement("div", "interface-overview");
+
+        this.interfacePanel.append(
+            panelTitle,
+            connectTitle,
+            this.interfaceASelect,
+            this.interfaceBSelect,
+            this.connectButton,
+            connectionsTitle,
+            this.connectionList,
+            this.interfaceOverview
+        );
+
+        this.interfacePanelToggle = htmlElement(
+            "button",
+            "collapsible-panel-toggle interface-panel-toggle",
+            "❯"
+        );
+        this.interfacePanelToggle.type = "button";
+        this.interfacePanelToggle.title = "Interface-Fenster einklappen";
+        this.interfacePanelToggle.setAttribute("aria-label", this.interfacePanelToggle.title);
+        this.interfacePanelToggle.setAttribute("aria-expanded", "true");
+
+        this.interfacePanelToggle.addEventListener("click", () => {
+            const collapsed = this.interfacePanel.classList.toggle("collapsed");
+
+            this.interfacePanelToggle.textContent = collapsed ? "❮" : "❯";
+            this.interfacePanelToggle.title = collapsed
+                ? "Interface-Fenster ausklappen"
+                : "Interface-Fenster einklappen";
+            this.interfacePanelToggle.setAttribute(
+                "aria-label",
+                this.interfacePanelToggle.title
+            );
+            this.interfacePanelToggle.setAttribute("aria-expanded", String(!collapsed));
+        });
+
+
+        const workspace = htmlElement("div", "workspace");
+
+        workspace.append(
+            this.canvas,
+            this.interfacePanel,
+            this.interfacePanelToggle
+        );
+
+        root.append(toolbar, workspace);
+
 
         this.registerEvents();
         new ResizeObserver(() => this.onResize()).observe(this.canvas);
@@ -177,6 +348,12 @@ export class TopologyEditor {
     onModelChange(listener: () => void): void {
         this.modelListeners.push(listener);
     }
+
+    private notifyModelListeners(): void {
+    for (const listener of this.modelListeners) {
+        listener();
+    }
+}
 
     get persistedState(): TopologyViewState {
         return this.viewState;
@@ -222,6 +399,7 @@ export class TopologyEditor {
         this.nameLabel.textContent = this.model.name;
         this.renderer.sync(this.model, (id) => this.positionOf(id));
         this.renderer.setSelected(this.selectedId);
+        this.renderInterfacePanel();
         this.emptyState.classList.toggle("visible", this.model.devices.size === 0);
 
         if (!this.hasReceivedState) {
@@ -239,9 +417,7 @@ export class TopologyEditor {
             }
         }
 
-        for (const listener of this.modelListeners) {
-            listener();
-        }
+        this.notifyModelListeners();
     }
 
     // Auswahl & Aktionen
@@ -296,6 +472,9 @@ export class TopologyEditor {
     }
 
     private setPlacementType(type: DeviceType | undefined): void {
+        if (type && this.cableMode) {
+            this.setCableMode(false);
+        }
         this.placementType = type;
         for (const [buttonType, button] of this.paletteButtons) {
             button.classList.toggle("active", buttonType === type);
@@ -459,6 +638,20 @@ export class TopologyEditor {
         }
 
         const deviceId = this.renderer.deviceIdAt(event.target);
+
+        if (this.cableMode) {
+            if (deviceId) {
+                this.handleCableDeviceClick(
+                    deviceId,
+                    event.clientX,
+                    event.clientY
+                );
+            } else {
+                this.showHint("Klicke auf ein Gerät, um das Kabelende auszuwählen.");
+            }
+            return;
+        }
+
         if (deviceId) {
             this.select(deviceId, true);
             const world = screenToWorld(this.viewport, screen);
@@ -620,14 +813,24 @@ export class TopologyEditor {
     }
 
     private onKeyDown(event: KeyboardEvent): void {
-        if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) {
+        if (
+            event.key !== "Escape" &&
+            (
+                event.target instanceof HTMLInputElement ||
+                event.target instanceof HTMLTextAreaElement ||
+                event.target instanceof HTMLSelectElement ||
+                event.target instanceof HTMLButtonElement
+            )
+        ) {
             return;
         }
         const step = event.shiftKey ? GRID_SIZE * 5 : GRID_SIZE;
 
         switch (event.key) {
             case "Escape":
-                if (this.gesture) {
+                if (this.cableMode) {
+                    this.setCableMode(false);
+                } else if (this.gesture) {
                     this.cancelGesture();
                 } else if (this.placementType) {
                     this.setPlacementType(undefined);
@@ -680,9 +883,354 @@ export class TopologyEditor {
         event.preventDefault();
     }
 
-    private notifyModelListeners(): void {
-        for (const listener of this.modelListeners) {
-            listener();
+    private setCableMode(active: boolean): void {
+        this.hideInterfacePopup();
+        this.cableMode = active;
+        this.cableFirstDeviceId = undefined;
+        this.cableFirstInterfaceId = undefined;
+        this.cableSecondDeviceId = undefined;
+        this.cableSecondInterfaceId = undefined;
+
+        this.interfaceASelect.value = "";
+        this.interfaceBSelect.value = "";
+
+        this.cableButton.classList.toggle("active", active);
+        this.cableButton.setAttribute("aria-pressed", String(active));
+
+        if (active) {
+            this.setPlacementType(undefined);
+            this.showHint("Klicke auf das erste Gerät · Esc bricht ab");
+        } else {
+            this.showHint(undefined);
+        }
+
+        this.renderInterfacePanel();
+    }
+
+        
+    private handleCableDeviceClick(
+        deviceId: string,
+        clientX: number,
+        clientY: number
+    ): void {
+        if (!this.cableFirstDeviceId) {
+            this.cableFirstDeviceId = deviceId;
+            this.select(deviceId, true);
+
+            this.showInterfacePopup(
+                deviceId,
+                clientX,
+                clientY,
+                "first"
+            );
+            return;
+        }
+
+        if (!this.cableFirstInterfaceId) {
+            this.showHint("Wähle zuerst ein Interface des ersten Geräts.");
+            return;
+        }
+
+        if (deviceId === this.cableFirstDeviceId) {
+            this.showHint("Wähle ein anderes Gerät für das zweite Kabelende.");
+            return;
+        }
+
+        this.cableSecondDeviceId = deviceId;
+        this.cableSecondInterfaceId = undefined;
+
+        this.select(deviceId, true);
+
+        this.showInterfacePopup(
+            deviceId,
+            clientX,
+            clientY,
+            "second"
+        );
+    }
+
+    private showInterfacePopup(
+        deviceId: string,
+        clientX: number,
+        clientY: number,
+        endpoint: "first" | "second"
+    ): void {
+        const device = this.model.devices.get(deviceId);
+
+        if (!device) {
+            return;
+        }
+
+        const occupied = new Set(
+            this.model.connections.flatMap((connection) => [
+                connection.interfaceAId,
+                connection.interfaceBId,
+            ])
+        );
+
+        this.interfacePopup.replaceChildren();
+
+        const title = htmlElement(
+            "h3",
+            "interface-popup-title",
+            `${device.hostname} · Interface auswählen`
+        );
+
+        this.interfacePopup.append(title);
+
+        const freeInterfaces = device.interfaces.filter(
+            (iface) => !occupied.has(iface.id)
+        );
+
+        for (const iface of device.interfaces) {
+            const isOccupied = occupied.has(iface.id);
+
+            const button = htmlElement(
+                "button",
+                `interface-popup-option${isOccupied ? " occupied" : ""}`,
+                `${iface.name}${isOccupied ? " · Belegt" : ""}`
+            );
+
+            button.type = "button";
+            button.disabled = isOccupied;
+
+            if (!isOccupied) {
+                button.addEventListener("click", () => {
+                    if (endpoint === "first") {
+                        this.cableFirstInterfaceId = iface.id;
+                        this.interfaceASelect.value = iface.id;
+
+                        this.interfacePopup.hidden = true;
+                        this.showHint(
+                            "Klicke auf das zweite Gerät."
+                        );
+                        return;
+                    }
+
+                    this.cableSecondInterfaceId = iface.id;
+                    this.interfaceBSelect.value = iface.id;
+
+                    if (
+                        !this.cableFirstInterfaceId ||
+                        !this.cableFirstDeviceId ||
+                        !this.cableSecondDeviceId
+                    ) {
+                        this.showHint("Bitte wähle beide Kabelenden aus.");
+                        return;
+                    }
+
+                    vscodeApi.postMessage({
+                        type: "addConnection",
+                        interfaceAId: this.cableFirstInterfaceId,
+                        interfaceBId: this.cableSecondInterfaceId,
+                    });
+
+                    this.setCableMode(false);
+                });
+            }
+
+            this.interfacePopup.append(button);
+        }
+
+        if (freeInterfaces.length === 0) {
+            this.interfacePopup.append(
+                htmlElement(
+                    "p",
+                    "interface-popup-empty",
+                    "Keine freien Interfaces verfügbar."
+                )
+            );
+        }
+
+        const canvasRect = this.canvas.getBoundingClientRect();
+
+        this.interfacePopup.hidden = false;
+
+        // Zuerst nahe am angeklickten Gerät positionieren.
+        this.interfacePopup.style.left =
+            `${clientX - canvasRect.left + 16}px`;
+        this.interfacePopup.style.top =
+            `${clientY - canvasRect.top + 8}px`;
+
+        // Danach sicherstellen, dass das Popup im sichtbaren Canvas bleibt.
+        const popupRect = this.interfacePopup.getBoundingClientRect();
+
+        const left = Math.max(
+            8,
+            Math.min(
+                clientX - canvasRect.left + 16,
+                this.canvas.clientWidth - popupRect.width - 8
+            )
+        );
+
+        const top = Math.max(
+            8,
+            Math.min(
+                clientY - canvasRect.top + 8,
+                this.canvas.clientHeight - popupRect.height - 8
+            )
+        );
+
+        this.interfacePopup.style.left = `${left}px`;
+        this.interfacePopup.style.top = `${top}px`;
+    }
+
+    private hideInterfacePopup(): void {
+        this.interfacePopup.hidden = true;
+        this.interfacePopup.replaceChildren();
+    }
+
+
+
+    private renderInterfacePanel(): void {
+        const occupied = new Set(
+            this.model.connections.flatMap((connection) => [
+                connection.interfaceAId,
+                connection.interfaceBId,
+            ])
+        );
+
+        const updateSelect = (
+            select: HTMLSelectElement,
+            deviceId: string | undefined,
+            selectedInterfaceId: string | undefined,
+            placeholderText: string
+        ): void => {
+            select.replaceChildren();
+            select.disabled = !this.cableMode || !deviceId;
+
+            const placeholder = document.createElement("option");
+            placeholder.value = "";
+            placeholder.textContent = placeholderText;
+            select.append(placeholder);
+
+            const device = deviceId
+                ? this.model.devices.get(deviceId)
+                : undefined;
+
+            for (const iface of device?.interfaces ?? []) {
+                const isOccupied = occupied.has(iface.id);
+                const option = document.createElement("option");
+
+                option.value = iface.id;
+                option.textContent =
+                    `${iface.name}${isOccupied ? " (belegt)" : ""}`;
+                option.disabled = isOccupied;
+
+                select.append(option);
+            }
+
+            if (
+                selectedInterfaceId &&
+                device?.interfaces.some(
+                    (iface) =>
+                        iface.id === selectedInterfaceId &&
+                        !occupied.has(iface.id)
+                )
+            ) {
+                select.value = selectedInterfaceId;
+            }
+        };
+
+        updateSelect(
+            this.interfaceASelect,
+            this.cableFirstDeviceId,
+            this.cableFirstInterfaceId,
+            this.cableFirstDeviceId
+                ? "Erstes Interface auswählen"
+                : "Erstes Gerät anklicken"
+        );
+
+        updateSelect(
+            this.interfaceBSelect,
+            this.cableSecondDeviceId,
+            this.cableSecondInterfaceId,
+            this.cableSecondDeviceId
+                ? "Zweites Interface auswählen"
+                : "Zweites Gerät anklicken"
+        );
+
+        this.connectButton.disabled = !(
+            this.cableMode &&
+            this.cableFirstInterfaceId &&
+            this.cableSecondInterfaceId
+        );
+
+        this.connectionList.replaceChildren();
+
+        if (this.model.connections.length === 0) {
+            this.connectionList.append(
+                htmlElement("p", "interface-empty", "Noch keine Verbindungen.")
+            );
+        }
+
+        for (const connection of this.model.connections) {
+            const deviceA = this.model.devices.get(connection.deviceA);
+            const deviceB = this.model.devices.get(connection.deviceB);
+            if (!deviceA || !deviceB) {
+                continue;
+            }
+
+            const item = htmlElement("div", "connection-item");
+            const description = htmlElement(
+                "div",
+                "connection-description",
+                `${deviceA.hostname} · ${connection.interfaceAName} ↔ ${deviceB.hostname} · ${connection.interfaceBName}`
+            );
+
+            const removeButton = htmlElement("button", "interface-remove", "Trennen");
+            removeButton.type = "button";
+            removeButton.addEventListener("click", () => {
+                vscodeApi.postMessage({
+                    type: "removeConnection",
+                    connectionId: connection.id,
+                });
+            });
+
+            item.append(description, removeButton);
+            this.connectionList.append(item);
+        }
+
+       
+        // Portübersicht aller Geräte
+        this.interfaceOverview.replaceChildren();
+
+        const overviewTitle = htmlElement(
+            "h3",
+            "interface-section-title",
+            "Portbelegung"
+        );
+
+        this.interfaceOverview.append(overviewTitle);
+        for (const device of this.model.devices.values()) {
+            const group = htmlElement("section", "interface-device");
+            group.append(
+                htmlElement("h4", "interface-device-title", device.hostname)
+            );
+
+            for (const iface of device.interfaces) {
+                const isOccupied = occupied.has(iface.id);
+                const row = htmlElement("div", "interface-row");
+
+                row.append(
+                    htmlElement("span", "interface-name", iface.name),
+                    htmlElement(
+                        "span",
+                        `interface-status ${isOccupied ? "occupied" : "free"}`,
+                        isOccupied ? "Belegt" : "Frei"
+                    )
+                );
+
+                group.append(row);
+            }
+
+            if (device.interfaces.length === 0) {
+                group.append(
+                    htmlElement("p", "interface-empty", "Keine Interfaces vorhanden.")
+                );
+            }
+
+            this.interfaceOverview.append(group);
         }
     }
 
