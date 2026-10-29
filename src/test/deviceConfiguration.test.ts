@@ -19,13 +19,16 @@ suite("H2c device configuration", () => {
         interfaces: [{ id: "gi0", deviceId: "r1", name: "GigabitEthernet0/0", status: "up" }]
     };
 
-    test("Legacy devices default to enabled interfaces and no protocols", () => {
+    test("Legacy devices activate only connected interfaces by default", () => {
         const draft = configurationOf(device);
         assert.deepStrictEqual(draft.interfaces[0], {
-            id: "gi0", enabled: true, ipAddress: "", subnetMask: "", description: "", layer: 3
+            id: "gi0", enabled: false, ipAddress: "", subnetMask: "", description: "", layer: 3
         });
         assert.deepStrictEqual(draft.protocols, []);
         assert.strictEqual(buildConfiguredDevice(device, draft, []).id, device.id);
+        assert.strictEqual(configurationOf(device, ["gi0"]).interfaces[0].enabled, true);
+        assert.strictEqual(configurationOf({ ...device, interfaces: [{ ...device.interfaces[0], enabled: false }] },
+            ["gi0"]).interfaces[0].enabled, false);
     });
 
     test("IPv4 and protocol drafts become H1c objects without changing the source", () => {
@@ -66,7 +69,7 @@ suite("H2c device configuration", () => {
 
     test("Legacy defaults apply when loading an H1c model directly", () => {
         const model = toNetworkDevice(device);
-        assert.strictEqual(model.interfaces[0].enabled, true);
+        assert.strictEqual(model.interfaces[0].enabled, false);
         assert.strictEqual(model.interfaces[0].ipAddress, undefined);
         assert.strictEqual(model.interfaces[0].subnetMask, undefined);
         assert.strictEqual(model.interfaces[0].type, InterfaceType.GigabitEthernet);
@@ -235,6 +238,38 @@ suite("H2c device configuration", () => {
             assert.strictEqual(cleared.interfaces[0].description, undefined);
         } finally {
             store.dispose(); restarted.dispose();
+            await vscode.workspace.fs.delete(uri, { recursive: true, useTrash: false });
+        }
+    });
+
+    test("Unused ports start disabled; connecting activates endpoints and disconnecting disables them", async () => {
+        const uri = vscode.Uri.file(path.join(os.tmpdir(), `topocheck-port-activation-${Date.now()}`));
+        const store = new TopologyStore(uri);
+        try {
+            const topology = await store.createTopology("Port activation");
+            const router = await store.addDevice(topology.id, { type: "router" });
+            const pc = await store.addDevice(topology.id, { type: "pc" });
+            const spare = await store.addInterface(topology.id, router.id, "Loopback0");
+            assert.ok(router.interfaces.every((iface) => iface.enabled === false));
+            assert.strictEqual(spare.enabled, false);
+            const connection = await store.addConnection(topology.id, router.interfaces[0].id, pc.interfaces[0].id);
+            let loaded = await store.loadTopology(topology.id);
+            assert.strictEqual(loaded.devices.find((item) => item.id === router.id)!.interfaces[0].enabled, true);
+            assert.strictEqual(loaded.devices.find((item) => item.id === router.id)!.interfaces[1].enabled, false);
+            assert.strictEqual(loaded.devices.find((item) => item.id === pc.id)!.interfaces[0].enabled, true);
+            const draft = configurationOf(loaded.devices.find((item) => item.id === router.id)!);
+            draft.interfaces[0].enabled = false;
+            await store.configureDevice(topology.id, router.id, draft);
+            assert.strictEqual((await store.loadNetworkDevice(topology.id, router.id)).interfaces[0].enabled, false);
+            await store.removeConnection(topology.id, connection.id);
+            loaded = await store.loadTopology(topology.id);
+            assert.ok(loaded.devices.every((item) => item.interfaces.every((iface) => iface.enabled === false)));
+            await store.addConnection(topology.id, router.interfaces[0].id, pc.interfaces[0].id);
+            assert.strictEqual((await store.loadNetworkDevice(topology.id, router.id)).interfaces[0].enabled, true);
+            await store.removeDevice(topology.id, pc.id);
+            assert.strictEqual((await store.loadNetworkDevice(topology.id, router.id)).interfaces[0].enabled, false);
+        } finally {
+            store.dispose();
             await vscode.workspace.fs.delete(uri, { recursive: true, useTrash: false });
         }
     });

@@ -12,7 +12,8 @@ try {
     if (!devices.length) { throw new Error('Kein passendes Gerät gefunden.'); }
     for (const device of devices) {
         const model = toNetworkDevice(device, topology.devices.filter((item) => item.id !== device.id)
-            .map((item) => item.hostname));
+            .map((item) => item.hostname), topology.connections.flatMap((connection) =>
+                [connection.interfaceAId, connection.interfaceBId]));
         console.log(JSON.stringify({
             modelClass: model.constructor.name,
             id: model.id, hostname: model.hostname, type: model.type,

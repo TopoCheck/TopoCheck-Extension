@@ -9,8 +9,9 @@
 4. Im rechten Eigenschaftenpanel Name/Label und Hostname getrennt bearbeiten.
    Domain-Name, Benutzername, Enable Secret, Console-/VTY-Passwort und Banner sind
    optional. Der Gerätetyp wird im Kopfbereich angezeigt.
-5. Standardmäßig werden nur aktuell verbundene Interfaces als Karten angezeigt.
-   Mit „Alle Interfaces anzeigen“ lassen sich auch freie Ports einblenden. Bei Bedarf
+5. Standardmäßig werden nur aktuell verbundene und aktivierte Interfaces als Karten angezeigt.
+   Mit „Alle Interfaces anzeigen“ lassen sich auch freie oder deaktivierte Ports einblenden.
+   Ein kurzer Hinweis erklärt den aktuellen Filter. Bei Bedarf
    IPv4-Adresse und Subnetzmaske gemeinsam eintragen und eine Beschreibung ergänzen.
    Eine Layer-Auswahl wird nicht angezeigt. Der Aktivierungsschalter ist unabhängig von der physischen Portbelegung;
    das Deaktivieren entfernt keine Kabel.
@@ -42,7 +43,7 @@ bearbeiten. Auf schmalen Ansichten liegt das Panel am rechten Rand über der Fl�
   Layout werden nicht geändert.
 - Neue Speicherfelder sind optional und ergänzen Schema 2. Bestehende Topologien
   ohne diese Felder bleiben lesbar: keine IP-Konfiguration, keine Protokolle,
-  Interfaces standardmäßig aktiviert. Die bisherigen Schema-1-Migrationen bleiben
+  Interfaces ohne Aktivierungsangabe nur bei vorhandener Verbindung aktiviert. Die bisherigen Schema-1-Migrationen bleiben
   gültig.
 - Die neuen optionalen Geräteangaben kommen im H1c-`NetworkDevice` an;
   Interface-Beschreibung und Layer in `NetworkInterface`. Ein fehlender Layer wird
@@ -51,6 +52,10 @@ bearbeiten. Auf schmalen Ansichten liegt das Panel am rechten Rand über der Fl�
   Bereits vorhandene Layer-Werte bleiben beim Speichern erhalten; sie sind im Panel
   nicht mehr bearbeitbar. Der Interfacefilter verändert keine Konfigurationswerte.
   Geänderte Verbindungen aktualisieren die Anzeige auch bei geöffnetem Panel.
+  Neue/freie Ports sind standardmäßig deaktiviert. Eine neue Kabelverbindung
+  aktiviert ihre beiden Endpunkte automatisch; Trennen oder Löschen des Gegenübers
+  deaktiviert sie wieder. Eine ausdrücklich gespeicherte manuelle Deaktivierung
+  bleibt beim Laden erhalten. Beim Filter bedeutet „in Nutzung“: verbunden und aktiviert.
   Bei einem Validierungsfehler an einem ausgeblendeten Port wird „Alle Interfaces
   anzeigen“ automatisch aktiviert und das fehlerhafte Feld fokussiert.
 - Passwortfelder sind maskiert. Der Modell-Inspektionsbefehl zeigt nur an, ob ein
@@ -69,7 +74,7 @@ Speichern, erneutes Laden, stabile IDs, Kabelerhalt und die atomare Ablehnung ei
 ungültigen Entwurfs. Für die Datenanbindung kommen Tests für echte H1c-Klassen beim
 Laden, vorhandene IDs/Interfacetypen und eine Beispieldatei samt Schema-1-Fallback hinzu.
 Stand nach der gemeinsamen Feldvalidierung: Typprüfung und Lint erfolgreich;
-162 Tests insgesamt, davon 22 H2c-Tests. Zusätzliche Tests prüfen die Speicherung,
+163 Tests insgesamt, davon 23 H2c-Tests. Zusätzliche Tests prüfen die Speicherung,
 das Leeren und das Laden sämtlicher neuer Felder sowie ihre Validierung.
 
 ### Datenanbindung selbst testen (ohne Formular)

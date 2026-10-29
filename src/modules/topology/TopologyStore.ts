@@ -126,6 +126,11 @@ export class TopologyStore implements vscode.Disposable {
         if (this.ensureDeviceInterfaces(topology)) {
             await this.persist(topology);
         }
+        const connected = new Set(topology.connections.flatMap((connection) =>
+            [connection.interfaceAId, connection.interfaceBId]));
+        for (const device of topology.devices) {
+            for (const iface of device.interfaces) { iface.enabled ??= connected.has(iface.id); }
+        }
 
         return topology;
     }
@@ -214,6 +219,7 @@ const interfaceNames =
                     deviceId,
                     name,
                     status: "down",
+                    enabled: false,
                 })),
             };
 
@@ -253,6 +259,9 @@ const interfaceNames =
                     device.interfaces.map((iface) => iface.id)
                 )
             );
+            const removedConnections = topology.connections.filter((connection) =>
+                !remainingInterfaceIds.has(connection.interfaceAId) || !remainingInterfaceIds.has(connection.interfaceBId));
+            for (const connection of removedConnections) { this.setConnectionInterfacesEnabled(topology, connection, false); }
             topology.connections = topology.connections.filter(
                 (connection) =>
                     remainingInterfaceIds.has(connection.interfaceAId) &&
@@ -381,6 +390,7 @@ const interfaceNames =
                 deviceId,
                 name,
                 status: "down",
+                enabled: false,
             };
 
             device.interfaces.push(iface);
@@ -473,6 +483,7 @@ const interfaceNames =
             };
 
             topology.connections.push(newConnection);
+            this.setConnectionInterfacesEnabled(topology, newConnection, true);
             await this.persist(topology);
             return newConnection;
         });
@@ -493,7 +504,8 @@ const interfaceNames =
         await this.withWriteLock(topologyId, async () => {
             const topology = await this.loadTopology(topologyId);
 
-            if (!topology.connections.some((c) => c.id === connectionId)) {
+            const removedConnection = topology.connections.find((c) => c.id === connectionId);
+            if (!removedConnection) {
                 throw new Error(
                     `Connection "${connectionId}" existiert nicht in Topology "${topologyId}".`
                 );
@@ -502,6 +514,7 @@ const interfaceNames =
             topology.connections = topology.connections.filter(
                 (c) => c.id !== connectionId
             );
+            this.setConnectionInterfacesEnabled(topology, removedConnection, false);
 
             await this.persist(topology);
         });
@@ -567,12 +580,21 @@ const interfaceNames =
                 deviceId: device.id,
                 name,
                 status: "down",
+                enabled: false,
             }));
 
             changed = true;
         }
 
         return changed;
+    }
+
+    private setConnectionInterfacesEnabled(topology: Topology, connection: Connection, enabled: boolean): void {
+        for (const device of topology.devices) {
+            for (const iface of device.interfaces) {
+                if (iface.id === connection.interfaceAId || iface.id === connection.interfaceBId) { iface.enabled = enabled; }
+            }
+        }
     }
 
     //Intern

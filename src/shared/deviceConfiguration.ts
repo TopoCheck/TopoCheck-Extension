@@ -44,7 +44,7 @@ export function isDeviceConfiguration(value: unknown): value is DeviceConfigurat
         });
 }
 
-export function configurationOf(device: Device): DeviceConfiguration {
+export function configurationOf(device: Device, connectedInterfaceIds: readonly string[] = []): DeviceConfiguration {
     return {
         label: device.label,
         hostname: device.hostname,
@@ -52,7 +52,7 @@ export function configurationOf(device: Device): DeviceConfiguration {
         enableSecret: device.enableSecret ?? "", consolePassword: device.consolePassword ?? "",
         vtyPassword: device.vtyPassword ?? "", banner: device.banner ?? "",
         interfaces: device.interfaces.map((iface) => ({
-            id: iface.id, enabled: iface.enabled ?? true,
+            id: iface.id, enabled: iface.enabled ?? connectedInterfaceIds.includes(iface.id),
             ipAddress: iface.ipAddress ?? "", subnetMask: iface.subnetMask ?? "",
             description: iface.description ?? "", layer: iface.layer ?? (device.type === "switch" ? 2 : 3)
         })),
@@ -61,8 +61,8 @@ export function configurationOf(device: Device): DeviceConfiguration {
 }
 
 /** Rehydrates a persisted device as real H1c classes, including defaults for old files. */
-export function toNetworkDevice(device: Device, otherHostnames: string[] = []): NetworkDevice {
-    return buildConfiguredDevice(device, configurationOf(device), otherHostnames);
+export function toNetworkDevice(device: Device, otherHostnames: string[] = [], connectedInterfaceIds: readonly string[] = []): NetworkDevice {
+    return buildConfiguredDevice(device, configurationOf(device, connectedInterfaceIds), otherHostnames);
 }
 
 /** Builds a validated H1c model without mutating the stored device or its IDs. */
