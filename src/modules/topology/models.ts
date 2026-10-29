@@ -5,6 +5,7 @@
  */
 
 import type { Point } from "../../shared/geometry";
+import type { ProtocolType } from "../../models/protocolType";
 
 export type DeviceType = "router" | "switch" | "pc";
 export type InterfaceStatus = "up" | "down";
@@ -23,6 +24,9 @@ export interface Interface {
     deviceId: string;
     name: string;
     status: InterfaceStatus;
+    enabled?: boolean;
+    ipAddress?: string;
+    subnetMask?: string;
 }
 
 export interface DeviceConfig {
@@ -40,6 +44,7 @@ export interface Device {
     type: DeviceType;
     interfaces: Interface[];
     config?: DeviceConfig;
+    protocols?: { id: string; type: ProtocolType; enabled: boolean }[];
 }
 
 export interface Connection {

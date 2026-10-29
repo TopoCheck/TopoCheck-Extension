@@ -647,3 +647,31 @@ kbd {
         padding: 8px;
     }
 }
+/* Native modal keeps configuration keyboard focus separate from canvas shortcuts. */
+.device-configuration {
+    width: min(540px, calc(100vw - 48px));
+    max-height: calc(100vh - 48px);
+    overflow: auto;
+    box-sizing: border-box;
+    padding: 24px;
+    color: var(--vscode-foreground);
+    background: var(--vscode-editor-background);
+    border: 1px solid var(--vscode-panel-border);
+    border-radius: 8px;
+}
+.device-configuration::backdrop { background: rgb(0 0 0 / 45%); }
+.device-configuration h2 { margin-top: 0; font-size: 18px; }
+.device-configuration fieldset { margin: 16px 0; padding: 12px; border: 1px solid var(--vscode-panel-border); }
+.device-configuration legend { font-weight: 600; padding: 0 6px; }
+.device-configuration label { display: flex; gap: 8px; align-items: center; justify-content: space-between; margin: 10px 0; }
+.device-configuration input:not([type="checkbox"]), .device-configuration select {
+    width: 55%; min-width: 0; box-sizing: border-box; padding: 6px;
+    color: var(--vscode-input-foreground); background: var(--vscode-input-background);
+    border: 1px solid var(--vscode-input-border, var(--vscode-panel-border));
+}
+.device-configuration :focus-visible { outline: 2px solid var(--vscode-focusBorder); outline-offset: 2px; }
+.device-configuration button { cursor: pointer; padding: 7px 14px; border: 0; color: var(--vscode-button-foreground); background: var(--vscode-button-background); }
+.device-configuration button:disabled { opacity: .6; cursor: wait; }
+.configuration-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.configuration-protocol { display: flex; justify-content: space-between; gap: 16px; }
+.configuration-error { color: var(--vscode-errorForeground); }

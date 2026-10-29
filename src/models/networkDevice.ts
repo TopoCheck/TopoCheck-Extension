@@ -93,7 +93,7 @@ export class NetworkDevice {
   }
 }
 
-const compatibleProtocols: Readonly<Record<DeviceType, readonly ProtocolType[]>> = {
+export const compatibleProtocols: Readonly<Record<DeviceType, readonly ProtocolType[]>> = {
   [DeviceType.Router]: [
     ProtocolType.Rip,
     ProtocolType.Ospf,

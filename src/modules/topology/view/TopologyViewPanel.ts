@@ -196,15 +196,9 @@ export class TopologyViewPanel implements vscode.Disposable {
         if (!device) {
             return;
         }
-        // geplante Schnittstelle: hier öffnet später der Konfigurationsdialog des Geräts
-        await vscode.commands.executeCommand("topocheck.device.configure", {
-            topologyId: this.topologyId,
-            deviceId,
-        }).then(undefined, () =>
-            vscode.window.showInformationMessage(
-                `TopoCheck: Der Konfigurationsdialog für "${device.hostname}" folgt mit Ziel H2c.`
-            )
-        );
+        await this.panel.webview.postMessage({ type: "editDevice", device,
+            otherHostnames: topology.devices.filter((item) => item.id !== deviceId)
+                .map((item) => item.hostname) } satisfies ExtensionToWebviewMessage);
     }
 
     // Kommunikation
@@ -229,6 +223,17 @@ export class TopologyViewPanel implements vscode.Disposable {
 
     private async handle(message: WebviewToExtensionMessage): Promise<void> {
         switch (message.type) {
+            case "configureDevice": {
+                let error: string | undefined;
+                try {
+                    await this.store.configureDevice(this.topologyId, message.deviceId, message.configuration);
+                } catch (cause) {
+                    error = cause instanceof Error ? cause.message : String(cause);
+                }
+                await this.panel.webview.postMessage({ type: "configurationResult",
+                    deviceId: message.deviceId, error } satisfies ExtensionToWebviewMessage);
+                return;
+            }
             case "ready":
                 await this.postState();
                 return;

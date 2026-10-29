@@ -4,6 +4,7 @@ import { isFinitePoint, roundPoint } from "../../shared/geometry";
 import { isHostnameTaken, nextHostname, validateHostname } from "./hostname";
 import { findFreeGridPosition } from "./layout";
 import { migrateTopology } from "./migrations";
+import { buildConfiguredDevice, DeviceConfiguration } from "../../shared/deviceConfiguration";
 import {
     Connection,
     CURRENT_SCHEMA_VERSION,
@@ -326,6 +327,26 @@ const interfaceNames =
             topologyId,
             deviceIds: moves.map((move) => move.deviceId),
         });
+    }
+
+    /** Validate the complete draft before changing anything; keep physical link IDs/status. */
+    async configureDevice(topologyId: string, deviceId: string, data: DeviceConfiguration): Promise<void> {
+        await this.withWriteLock(topologyId, async () => {
+            const topology = await this.loadTopology(topologyId);
+            const device = this.findDeviceOrThrow(topology, deviceId);
+            const model = buildConfiguredDevice(device, data, topology.devices
+                .filter((item) => item.id !== deviceId).map((item) => item.hostname));
+            device.hostname = model.hostname;
+            device.label = model.hostname;
+            device.interfaces = device.interfaces.map((iface) => {
+                const configured = model.findInterface(iface.id)!;
+                return { ...iface, enabled: configured.enabled,
+                    ipAddress: configured.ipAddress, subnetMask: configured.subnetMask };
+            });
+            device.protocols = model.protocols.map(({ id, type, enabled }) => ({ id, type, enabled }));
+            await this.persist(topology);
+        });
+        this.fireChange({ type: TopologyChangeType.DeviceConfigUpdated, topologyId, deviceId });
     }
 
     //Interfaces
