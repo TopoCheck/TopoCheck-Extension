@@ -22,6 +22,10 @@ export class DeviceConfigurationForm {
     private switchNotice: HTMLElement | undefined;
     private readonly disabledBeforeSave = new Map<FormControl, boolean>();
     private readonly fields = new Map<string, { control: FieldControl; error: HTMLElement }>();
+    private readonly interfaceCards = new Map<string, { card: HTMLElement; status: HTMLElement }>();
+    private connectedIds = new Set<string>();
+    private showAllInterfaces: HTMLInputElement | undefined;
+    private emptyInterfaces: HTMLElement | undefined;
 
     constructor(private readonly root: HTMLElement) {
         this.dialog.className = "device-configuration";
@@ -44,9 +48,14 @@ export class DeviceConfigurationForm {
                 this.confirmDiscard(`Zu „${message.device.label}“ wechseln und ungespeicherte Änderungen verwerfen?`,
                     () => this.open(message.device, message.otherHostnames, message.connectedInterfaceIds ?? []));
             } else { this.open(message.device, message.otherHostnames, message.connectedInterfaceIds ?? []); }
-        } else if (message.type === "state" && this.dialog.open && !this.pending &&
-            !message.topology.devices.some((device) => device.id === this.deviceId)) {
-            this.close();
+        } else if (message.type === "state" && this.dialog.open) {
+            if (!this.pending && !message.topology.devices.some((device) => device.id === this.deviceId)) {
+                this.close();
+            } else {
+                this.connectedIds = new Set(message.topology.connections.flatMap((connection) =>
+                    [connection.interfaceAId, connection.interfaceBId]));
+                this.updateInterfaceVisibility();
+            }
         } else if (message.type === "configurationResult" &&
             this.dialog.open && this.pending && message.deviceId === this.deviceId) {
             this.pending = false;
@@ -110,7 +119,30 @@ export class DeviceConfigurationForm {
         }
         this.showError(errors.map((issue) => issue.message).join("\n"));
         const first = errors.find((issue) => this.fields.has(issue.field));
-        if (first) { this.fields.get(first.field)!.control.focus(); }
+        if (first) {
+            const control = this.fields.get(first.field)!.control;
+            if (control.closest<HTMLElement>(".configuration-interface-card")?.hidden && this.showAllInterfaces) {
+                this.showAllInterfaces.checked = true;
+                this.updateInterfaceVisibility();
+            }
+            control.focus();
+        }
+    }
+
+    private updateInterfaceVisibility(): void {
+        let visible = 0;
+        for (const [id, { card, status }] of this.interfaceCards) {
+            const connected = this.connectedIds.has(id);
+            card.hidden = !this.showAllInterfaces?.checked && !connected;
+            status.textContent = connected ? "Verbunden" : "Frei";
+            if (!card.hidden) { visible++; }
+        }
+        if (this.emptyInterfaces) {
+            this.emptyInterfaces.hidden = visible > 0;
+            this.emptyInterfaces.textContent = this.interfaceCards.size
+                ? "Keine Interfaces verbunden. Mit „Alle Interfaces anzeigen“ kannst du freie Ports einblenden."
+                : "Keine Interfaces vorhanden.";
+        }
     }
 
     private validatedField(key: string, text: string, control: FieldControl): HTMLElement {
@@ -129,6 +161,7 @@ export class DeviceConfigurationForm {
     private open(device: Device, otherHostnames: string[], connectedIds: string[]): void {
         this.deviceId = device.id; this.pending = false; this.dirty = false;
         this.fields.clear(); this.disabledBeforeSave.clear();
+        this.interfaceCards.clear(); this.connectedIds = new Set(connectedIds);
         const draft = configurationOf(device);
         const form = document.createElement("form");
         form.noValidate = true;
@@ -186,21 +219,23 @@ export class DeviceConfigurationForm {
         const interfaces = section("Interfaces");
         const helper = document.createElement("p");
         helper.className = "configuration-note";
-        helper.textContent = "Vorhandene Ports · IP-Adresse und Maske gemeinsam optional";
+        helper.textContent = "Verbundene Ports · IP-Adresse und Maske gemeinsam optional";
         interfaces.append(helper);
+        this.showAllInterfaces = input("checkbox");
+        this.showAllInterfaces.addEventListener("change", (event) => {
+            // This is a view preference, not a configuration edit.
+            event.stopPropagation();
+            this.updateInterfaceVisibility();
+        });
+        this.showAllInterfaces.addEventListener("input", (event) => event.stopPropagation());
+        const filter = field("Alle Interfaces anzeigen", this.showAllInterfaces);
+        filter.classList.add("configuration-interface-filter");
+        interfaces.append(filter);
         const controls = device.interfaces.map((iface, index) => {
             const card = document.createElement("section"); card.className = "configuration-interface-card";
             const cardHeader = document.createElement("header"); cardHeader.className = "configuration-interface-header";
             const name = document.createElement("h3"); name.textContent = iface.name;
-            const layer = document.createElement("select");
-            layer.className = "configuration-layer";
-            layer.setAttribute("aria-label", `${iface.name}: Layer`);
-            for (const value of [2, 3]) {
-                const option = document.createElement("option"); option.value = String(value);
-                option.textContent = `Layer ${value}`; layer.append(option);
-            }
-            layer.value = String(draft.interfaces[index].layer);
-            cardHeader.append(name, layer);
+            cardHeader.append(name);
             const status = document.createElement("span"); status.className = "configuration-port-status";
             status.textContent = connectedIds.includes(iface.id) ? "Verbunden" : "Frei";
             const enabled = input("checkbox"); enabled.checked = draft.interfaces[index].enabled;
@@ -218,9 +253,13 @@ export class DeviceConfigurationForm {
                 this.validatedField(`interfaces.${index}.description`, "Beschreibung", description),
                 field("Aktiviert", enabled));
             interfaces.append(card);
-            return { id: iface.id, enabled, ip, mask, description, layer };
+            this.interfaceCards.set(iface.id, { card, status });
+            return { id: iface.id, enabled, ip, mask, description };
         });
-        if (!controls.length) { interfaces.append(document.createTextNode("Keine Interfaces vorhanden.")); }
+        this.emptyInterfaces = document.createElement("p");
+        this.emptyInterfaces.className = "configuration-note";
+        interfaces.append(this.emptyInterfaces);
+        this.updateInterfaceVisibility();
         content.append(interfaces);
 
         const protocols = section("Protokolle");
@@ -251,9 +290,9 @@ export class DeviceConfigurationForm {
                 domainName: domain.value.trim(), username: username.value.trim(),
                 enableSecret: enableSecret.value, consolePassword: consolePassword.value,
                 vtyPassword: vtyPassword.value, banner: banner.value,
-                interfaces: controls.map(({ id, enabled, ip, mask, description, layer }) => ({
+                interfaces: controls.map(({ id, enabled, ip, mask, description }, index) => ({
                     id, enabled: enabled.checked, ipAddress: ip.value.trim(), subnetMask: mask.value.trim(),
-                    description: description.value.trim(), layer: Number(layer.value) as 2 | 3
+                    description: description.value.trim(), layer: draft.interfaces[index].layer
                 })),
                 protocols: protocolControls.filter((item) => item.selected.checked)
                     .map(({ type, enabled }) => ({ type, enabled: enabled.checked }))

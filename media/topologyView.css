@@ -704,7 +704,7 @@ kbd {
 .configuration-interface-card { margin: 0 0 10px; padding: 10px; border: 1px solid var(--vscode-panel-border, #dedfe8); border-radius: 7px; background: var(--vscode-editor-background); }
 .configuration-interface-header { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
 .configuration-interface-header h3 { min-width: 0; overflow-wrap: anywhere; margin: 0; font: 600 10px var(--vscode-editor-font-family, monospace); color: var(--configuration-accent); }
-.device-configuration .configuration-layer { max-width: 85px; border: 0; border-radius: 4px; padding: 3px; background: color-mix(in srgb, #10b981 16%, var(--vscode-editor-background)); color: var(--vscode-foreground); font: inherit; font-size: 9px; text-transform: uppercase; }
+.configuration-interface-filter { margin-bottom: 12px; }
 .configuration-port-status { display: block; margin: 5px 0 9px; font-size: 9px; color: var(--vscode-descriptionForeground); }
 .configuration-interface-card .configuration-field { margin-bottom: 8px; }
 .configuration-interface-card label:not(.configuration-checkbox) > span { font-size: 8px; letter-spacing: 0; text-transform: none; }

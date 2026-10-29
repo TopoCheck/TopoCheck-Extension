@@ -9,9 +9,10 @@
 4. Im rechten Eigenschaftenpanel Name/Label und Hostname getrennt bearbeiten.
    Domain-Name, Benutzername, Enable Secret, Console-/VTY-Passwort und Banner sind
    optional. Der Gerätetyp wird im Kopfbereich angezeigt.
-5. Vorhandene Interfaces stehen als einzelne Karten bereit. Bei Bedarf IPv4-Adresse
-   und Subnetzmaske gemeinsam eintragen, eine Beschreibung ergänzen und Layer 2/3
-   auswählen. Der Aktivierungsschalter ist unabhängig von der physischen Portbelegung;
+5. Standardmäßig werden nur aktuell verbundene Interfaces als Karten angezeigt.
+   Mit „Alle Interfaces anzeigen“ lassen sich auch freie Ports einblenden. Bei Bedarf
+   IPv4-Adresse und Subnetzmaske gemeinsam eintragen und eine Beschreibung ergänzen.
+   Eine Layer-Auswahl wird nicht angezeigt. Der Aktivierungsschalter ist unabhängig von der physischen Portbelegung;
    das Deaktivieren entfernt keine Kabel.
 6. Unterstützte Protokolle auswählen und ihren Aktivierungszustand festlegen.
    Abgewählte Protokolle werden beim Speichern entfernt. PCs bieten keine Protokolle.
@@ -47,6 +48,11 @@ bearbeiten. Auf schmalen Ansichten liegt das Panel am rechten Rand über der Fl�
   Interface-Beschreibung und Layer in `NetworkInterface`. Ein fehlender Layer wird
   beim Switch mit 2, bei Router/PC mit 3 vorbelegt. Der Layer ist hier eine
   Konfigurationsangabe; es werden daraus keine Cisco-Befehle generiert.
+  Bereits vorhandene Layer-Werte bleiben beim Speichern erhalten; sie sind im Panel
+  nicht mehr bearbeitbar. Der Interfacefilter verändert keine Konfigurationswerte.
+  Geänderte Verbindungen aktualisieren die Anzeige auch bei geöffnetem Panel.
+  Bei einem Validierungsfehler an einem ausgeblendeten Port wird „Alle Interfaces
+  anzeigen“ automatisch aktiviert und das fehlerhafte Feld fokussiert.
 - Passwortfelder sind maskiert. Der Modell-Inspektionsbefehl zeigt nur an, ob ein
   Passwort gesetzt ist; ungültige Nachrichten werden ohne ihren Inhalt protokolliert.
 - IP-Adresse und Maske sind gemeinsam optional. IPv4-Oktette und zusammenhängende
