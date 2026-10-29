@@ -69,7 +69,7 @@ bearbeiten. Auf schmalen Ansichten liegt das Panel am rechten Rand 체ber der Fl�
 ## Verifikation
 
 Die gemeinsame Speicheroperation und Tests f체r fehlgeschlagene Schreibvorg채nge
-sind in [Ger채tekonfiguration speichern](device-configuration-save.md) beschrieben.
+sind in [Ger채tekonfiguration speichern](storage.md) beschrieben.
 
 `npm.cmd test` pr체ft zus채tzlich zu den bestehenden Tests die Modellabbildung,
 Legacy-Standardwerte, ung체ltige Eingaben/Nachrichten, Hostnamen und Protokolle sowie

@@ -1,7 +1,7 @@
 import * as assert from "assert";
-import { parseWebviewMessage } from "../modules/topology/view/parseWebviewMessage";
-import { computeMinimapTransform, worldToMinimap } from "../shared/minimap";
-import { fitBounds, screenToWorld, visibleWorldBounds, zoomAt } from "../shared/viewport";
+import { parseWebviewMessage } from "../../modules/topology/view/parseWebviewMessage";
+import { computeMinimapTransform, worldToMinimap } from "../../shared/minimap";
+import { fitBounds, screenToWorld, visibleWorldBounds, zoomAt } from "../../shared/viewport";
 
 suite("Topologieansicht ", () => {
     test("Gültige Nachrichten aus der Webview werden akzeptiert", () => {

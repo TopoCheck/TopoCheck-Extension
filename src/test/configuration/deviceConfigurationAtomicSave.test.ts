@@ -3,9 +3,9 @@ import { randomUUID } from "crypto";
 import * as os from "os";
 import * as path from "path";
 import * as vscode from "vscode";
-import { TopologyChangeEvent, TopologyChangeType, TopologyFileWriter, TopologyStore } from "../modules/topology/TopologyStore";
-import type { Device, Topology } from "../modules/topology/models";
-import { configurationOf } from "../shared/deviceConfiguration";
+import { TopologyChangeEvent, TopologyChangeType, TopologyFileWriter, TopologyStore } from "../../modules/topology/TopologyStore";
+import type { Device, Topology } from "../../modules/topology/models";
+import { configurationOf } from "../../shared/deviceConfiguration";
 
 suite("H2c atomic save", () => {
     let uri: vscode.Uri;

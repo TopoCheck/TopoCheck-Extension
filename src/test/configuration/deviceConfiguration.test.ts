@@ -2,16 +2,16 @@ import * as assert from "assert";
 import * as os from "os";
 import * as path from "path";
 import * as vscode from "vscode";
-import { ProtocolType } from "../models/protocolType";
-import { InterfaceType } from "../models/interfaceType";
-import { NetworkDevice } from "../models/networkDevice";
-import { NetworkInterface } from "../models/networkInterface";
-import { NetworkProtocol } from "../models/networkProtocol";
-import { TopologyStore } from "../modules/topology/TopologyStore";
-import type { Device } from "../modules/topology/models";
-import { buildConfiguredDevice, configurationOf, toNetworkDevice } from "../shared/deviceConfiguration";
-import { parseWebviewMessage } from "../modules/topology/view/parseWebviewMessage";
-import { DeviceConfigurationValidationError } from "../shared/validateDeviceConfiguration";
+import { ProtocolType } from "../../models/protocolType";
+import { InterfaceType } from "../../models/interfaceType";
+import { NetworkDevice } from "../../models/networkDevice";
+import { NetworkInterface } from "../../models/networkInterface";
+import { NetworkProtocol } from "../../models/networkProtocol";
+import { TopologyStore } from "../../modules/topology/TopologyStore";
+import type { Device } from "../../modules/topology/models";
+import { buildConfiguredDevice, configurationOf, toNetworkDevice } from "../../shared/deviceConfiguration";
+import { parseWebviewMessage } from "../../modules/topology/view/parseWebviewMessage";
+import { DeviceConfigurationValidationError } from "../../shared/validateDeviceConfiguration";
 
 suite("H2c device configuration", () => {
     const device: Device = {
@@ -82,7 +82,7 @@ suite("H2c device configuration", () => {
         const restarted = new TopologyStore(uri);
         try {
             const exampleBytes = await vscode.workspace.fs.readFile(vscode.Uri.file(
-                path.resolve(__dirname, "../../test-workspace/h2c-topology.json")));
+                path.resolve(__dirname, "../../../test-workspace/h2c-topology.json")));
             await vscode.workspace.fs.createDirectory(uri);
             const file = vscode.Uri.joinPath(uri, "h2c-example.json");
             await vscode.workspace.fs.writeFile(file, exampleBytes);

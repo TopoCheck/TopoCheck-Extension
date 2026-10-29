@@ -1,10 +1,10 @@
 import * as assert from "assert";
-import { InterfaceType } from "../models/interfaceType";
-import { NetworkInterface } from "../models/networkInterface";
-import { ProtocolType } from "../models/protocolType";
-import type { Device } from "../modules/topology/models";
-import { buildConfiguredDevice, configurationOf } from "../shared/deviceConfiguration";
-import { DeviceConfigurationValidationError, validateDeviceConfiguration } from "../shared/validateDeviceConfiguration";
+import { InterfaceType } from "../../models/interfaceType";
+import { NetworkInterface } from "../../models/networkInterface";
+import { ProtocolType } from "../../models/protocolType";
+import type { Device } from "../../modules/topology/models";
+import { buildConfiguredDevice, configurationOf } from "../../shared/deviceConfiguration";
+import { DeviceConfigurationValidationError, validateDeviceConfiguration } from "../../shared/validateDeviceConfiguration";
 
 suite("H2c field validation (without VS Code or DOM)", () => {
     const device: Device = {

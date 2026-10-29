@@ -147,54 +147,8 @@ Bestehende Module müssen dafür nicht verändert werden. Dadurch unterstützt d
 
 ## 6. Ordnerstruktur
 
-Die für die modulare Backend-Architektur relevanten Dateien befinden sich in folgenden Bereichen:
-
-```text
-src/
-│   extension.ts
-│   README.md
-│
-├───core
-│   │   ModuleRegistry.ts
-│   │
-│   └───interfaces
-│           IModule.ts
-│           IService.ts
-│
-├───docs
-│       architecture.md
-│
-├───example-module
-│       ExampleModule.ts
-│
-├───modules
-│   ├───config
-│   │       ConfigModule.ts
-│   │       index.ts
-│   │
-│   ├───diagnostics
-│   │       DiagnosticsModule.ts
-│   │       index.ts
-│   │
-│   ├───external-api
-│   │       ExternalApiModule.ts
-│   │       index.ts
-│   │
-│   └───topology
-│           index.ts
-│           TopologyModule.ts
-│
-├───test
-│       extension.test.ts
-│
-├───test-workspace
-│       invalid-router.cfg
-│       valid-router.cfg
-│
-└───validation
-        configValidator.ts
-
-```
+Die aktuelle Ordnerstruktur und die Ablageregeln sind zentral in der
+[Dokumentationsübersicht](../README.md#ablage) beschrieben.
 
 ## 7. Integration in extension.ts
 
