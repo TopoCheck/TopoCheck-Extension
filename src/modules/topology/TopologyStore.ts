@@ -64,6 +64,9 @@ export interface NewDeviceInput {
     position?: Position;
 }
 
+/** Injectable file writer so storage failures can be tested against real files. */
+export type TopologyFileWriter = Pick<typeof vscode.workspace.fs, "createDirectory" | "writeFile" | "rename" | "delete">;
+
 /*Verwaltung von Anlegen/Laden/Speichern/Löschen von Topologien. (CRUD)*/
 
 export class TopologyStore implements vscode.Disposable {
@@ -77,7 +80,8 @@ export class TopologyStore implements vscode.Disposable {
 
     private readonly writeQueues = new Map<string, Promise<void>>();
 
-    constructor(private readonly storageUri: vscode.Uri) { }
+    constructor(private readonly storageUri: vscode.Uri,
+        private readonly fileWriter: TopologyFileWriter = vscode.workspace.fs) { }
 
     async createTopology(name: string): Promise<Topology> {
         const now = new Date().toISOString();
@@ -102,6 +106,10 @@ export class TopologyStore implements vscode.Disposable {
     }
 
     async loadTopology(id: string): Promise<Topology> {
+        return this.readTopology(id, true);
+    }
+
+    private async readTopology(id: string, persistRepairs: boolean): Promise<Topology> {
         let raw: Uint8Array;
 
         try {
@@ -123,7 +131,7 @@ export class TopologyStore implements vscode.Disposable {
 
         const topology = migrateTopology(parsed);
 
-        if (this.ensureDeviceInterfaces(topology)) {
+        if (this.ensureDeviceInterfaces(topology) && persistRepairs) {
             await this.persist(topology);
         }
         const connected = new Set(topology.connections.flatMap((connection) =>
@@ -348,31 +356,35 @@ const interfaceNames =
         });
     }
 
-    /** Validate the complete draft before changing anything; keep physical link IDs/status. */
+    /** Snapshot, validate, stage and persist once; emit only after the file replacement succeeds. */
     async configureDevice(topologyId: string, deviceId: string, data: DeviceConfiguration): Promise<void> {
+        // Callers may continue editing their draft while this request waits in the queue.
+        const configuration = structuredClone(data);
         await this.withWriteLock(topologyId, async () => {
-            const topology = await this.loadTopology(topologyId);
+            // Even repairing a legacy file must not write anything before validation succeeds.
+            const topology = await this.readTopology(topologyId, false);
             const device = this.findDeviceOrThrow(topology, deviceId);
-            const model = buildConfiguredDevice(device, data, topology.devices
+            const model = buildConfiguredDevice(device, configuration, topology.devices
                 .filter((item) => item.id !== deviceId).map((item) => item.hostname));
-            device.hostname = model.hostname;
-            device.label = data.label?.trim() ?? device.label;
-            device.domainName = model.domainName;
-            device.username = model.username;
-            device.enableSecret = model.enableSecret;
-            device.consolePassword = model.consolePassword;
-            device.vtyPassword = model.vtyPassword;
-            device.banner = model.banner;
-            device.interfaces = device.interfaces.map((iface) => {
-                const configured = model.findInterface(iface.id)!;
-                return { ...iface, type: configured.type, enabled: configured.enabled,
-                    ipAddress: configured.ipAddress, subnetMask: configured.subnetMask,
-                    description: configured.description, layer: configured.layer };
-            });
-            device.protocols = model.protocols.map(({ id, type, enabled }) => ({ id, type, enabled }));
-            await this.persist(topology);
+            const replacement: Device = {
+                ...device,
+                hostname: model.hostname, label: configuration.label?.trim() ?? device.label,
+                domainName: model.domainName, username: model.username,
+                enableSecret: model.enableSecret, consolePassword: model.consolePassword,
+                vtyPassword: model.vtyPassword, banner: model.banner,
+                interfaces: device.interfaces.map((iface) => {
+                    const configured = model.findInterface(iface.id)!;
+                    return { ...iface, type: configured.type, enabled: configured.enabled,
+                        ipAddress: configured.ipAddress, subnetMask: configured.subnetMask,
+                        description: configured.description, layer: configured.layer };
+                }),
+                protocols: model.protocols.map(({ id, type, enabled }) => ({ id, type, enabled }))
+            };
+            const candidate: Topology = { ...topology,
+                devices: topology.devices.map((item) => item.id === deviceId ? replacement : item) };
+            await this.persist(candidate);
+            this.fireChange({ type: TopologyChangeType.DeviceConfigUpdated, topologyId, deviceId });
         });
-        this.fireChange({ type: TopologyChangeType.DeviceConfigUpdated, topologyId, deviceId });
     }
 
     //Interfaces
@@ -653,24 +665,30 @@ const interfaceNames =
     }
 
     private tempFileUri(id: string): vscode.Uri {
-        return vscode.Uri.joinPath(this.storageUri, `${id}.json.tmp`);
+        return vscode.Uri.joinPath(this.storageUri, `${id}.${randomUUID()}.json.tmp`);
     }
 
     private async ensureStorageDir(): Promise<void> {
-        await vscode.workspace.fs.createDirectory(this.storageUri);
+        await this.fileWriter.createDirectory(this.storageUri);
     }
 
     private async persist(topology: Topology): Promise<void> {
         await this.ensureStorageDir();
-        topology.updatedAt = new Date().toISOString();
-
-        const encoded = Buffer.from(JSON.stringify(topology, null, 2), "utf8");
+        const updatedAt = new Date().toISOString();
+        const encoded = Buffer.from(JSON.stringify({ ...topology, updatedAt }, null, 2), "utf8");
         const tempUri = this.tempFileUri(topology.id);
         const finalUri = this.fileUri(topology.id);
 
         // write-then-rename: verhindert, dass ein Absturz mitten im Schreiben eine bereits gespeicherte, gültige Topology-Datei zerstört.
-        await vscode.workspace.fs.writeFile(tempUri, encoded);
-        await vscode.workspace.fs.rename(tempUri, finalUri, { overwrite: true });
+        try {
+            await this.fileWriter.writeFile(tempUri, encoded);
+            await this.fileWriter.rename(tempUri, finalUri, { overwrite: true });
+        } catch (error) {
+            try { await this.fileWriter.delete(tempUri, { useTrash: false }); }
+            catch { /* Cleanup must not hide the original write/rename error. */ }
+            throw error;
+        }
+        topology.updatedAt = updatedAt;
     }
 
     private fireChange(event: TopologyChangeEvent): void {

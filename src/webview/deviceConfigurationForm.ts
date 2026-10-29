@@ -233,10 +233,6 @@ export class DeviceConfigurationForm {
             this.validatedField("banner", "Banner", banner));
 
         const interfaces = section("Interfaces");
-        const helper = document.createElement("p");
-        helper.className = "configuration-note";
-        helper.textContent = "Verbundene Ports · IP-Adresse und Maske gemeinsam optional";
-        interfaces.append(helper);
         this.showAllInterfaces = input("checkbox");
         this.showAllInterfaces.addEventListener("change", (event) => {
             // This is a view preference, not a configuration edit.

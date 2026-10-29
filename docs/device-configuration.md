@@ -68,13 +68,16 @@ bearbeiten. Auf schmalen Ansichten liegt das Panel am rechten Rand über der Fl�
 
 ## Verifikation
 
+Die gemeinsame Speicheroperation und Tests für fehlgeschlagene Schreibvorgänge
+sind in [Gerätekonfiguration speichern](device-configuration-save.md) beschrieben.
+
 `npm.cmd test` prüft zusätzlich zu den bestehenden Tests die Modellabbildung,
 Legacy-Standardwerte, ungültige Eingaben/Nachrichten, Hostnamen und Protokolle sowie
 Speichern, erneutes Laden, stabile IDs, Kabelerhalt und die atomare Ablehnung eines
 ungültigen Entwurfs. Für die Datenanbindung kommen Tests für echte H1c-Klassen beim
 Laden, vorhandene IDs/Interfacetypen und eine Beispieldatei samt Schema-1-Fallback hinzu.
 Stand nach der gemeinsamen Feldvalidierung: Typprüfung und Lint erfolgreich;
-163 Tests insgesamt, davon 23 H2c-Tests. Zusätzliche Tests prüfen die Speicherung,
+169 Tests insgesamt, davon 29 H2c-Tests. Zusätzliche Tests prüfen die Speicherung,
 das Leeren und das Laden sämtlicher neuer Felder sowie ihre Validierung.
 
 ### Datenanbindung selbst testen (ohne Formular)
