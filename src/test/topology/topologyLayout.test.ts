@@ -7,7 +7,7 @@ import {
     LayoutChangeEvent,
     TopologyChangeType,
     TopologyStore,
-} from "../modules/topology";
+} from "../../modules/topology";
 
 suite("TopologyStore – Layout (H2a)", () => {
     let storageUri: vscode.Uri;

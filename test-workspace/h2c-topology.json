@@ -1,0 +1,57 @@
+{
+  "id": "h2c-example",
+  "name": "H2c Datenanbindung",
+  "schemaVersion": 2,
+  "createdAt": "2026-10-29T00:00:00.000Z",
+  "updatedAt": "2026-10-29T00:00:00.000Z",
+  "devices": [
+    {
+      "id": "router-example",
+      "topologyId": "h2c-example",
+      "label": "RouterExample",
+      "hostname": "RouterExample",
+      "type": "router",
+      "interfaces": [
+        {
+          "id": "router-example-uplink",
+          "deviceId": "router-example",
+          "name": "GigabitEthernet0/0",
+          "type": "gigabit-ethernet",
+          "status": "up",
+          "enabled": true,
+          "ipAddress": "10.0.0.1",
+          "subnetMask": "255.255.255.0"
+        },
+        {
+          "id": "router-example-unused",
+          "deviceId": "router-example",
+          "name": "GigabitEthernet0/1",
+          "status": "down",
+          "enabled": false
+        }
+      ],
+      "protocols": [
+        { "id": "router-example-ospf", "type": "ospf", "enabled": true }
+      ]
+    },
+    {
+      "id": "pc-legacy",
+      "topologyId": "h2c-example",
+      "label": "PC1",
+      "hostname": "PC1",
+      "type": "pc",
+      "interfaces": [
+        { "id": "pc-legacy-eth0", "deviceId": "pc-legacy", "name": "Ethernet0", "status": "up" }
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "example-cable",
+      "topologyId": "h2c-example",
+      "interfaceAId": "router-example-uplink",
+      "interfaceBId": "pc-legacy-eth0"
+    }
+  ],
+  "layout": { "devices": { "router-example": { "x": 0, "y": 0 }, "pc-legacy": { "x": 240, "y": 0 } } }
+}

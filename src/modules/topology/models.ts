@@ -5,6 +5,9 @@
  */
 
 import type { Point } from "../../shared/geometry";
+import type { ProtocolType } from "../../models/protocolType";
+import type { InterfaceType } from "../../models/interfaceType";
+import type { DeviceAccessConfiguration } from "../../models/deviceAccessConfiguration";
 
 export type DeviceType = "router" | "switch" | "pc";
 export type InterfaceStatus = "up" | "down";
@@ -23,6 +26,13 @@ export interface Interface {
     deviceId: string;
     name: string;
     status: InterfaceStatus;
+    enabled?: boolean;
+    ipAddress?: string;
+    subnetMask?: string;
+    /** Optional for older files; otherwise preserves the H1c type independently of the name. */
+    type?: InterfaceType;
+    description?: string;
+    layer?: 2 | 3;
 }
 
 export interface DeviceConfig {
@@ -32,7 +42,7 @@ export interface DeviceConfig {
     updatedAt: string;
 }
 
-export interface Device {
+export interface Device extends DeviceAccessConfiguration {
     id: string;
     topologyId: string;
     label: string;
@@ -40,6 +50,7 @@ export interface Device {
     type: DeviceType;
     interfaces: Interface[];
     config?: DeviceConfig;
+    protocols?: { id: string; type: ProtocolType; enabled: boolean }[];
 }
 
 export interface Connection {

@@ -1,8 +1,8 @@
 import * as assert from "assert";
 import * as vscode from "vscode";
-import { DeviceType } from "../models";
-import { parseCiscoConfig } from "../parser";
-import { validateConfiguration } from "../validation/configValidator";
+import { DeviceType } from "../../models";
+import { parseCiscoConfig } from "../../parser";
+import { validateConfiguration } from "../../validation/configValidator";
 
 suite("Parser editor diagnostics", () => {
   test("accepts abbreviations in the editor without obsolete regex errors", async () => {
