@@ -1,74 +1,164 @@
-# topocheck README
+# TopoCheck
 
-Die Projektunterlagen und die Übersicht der Ordnerstruktur befinden sich unter
-[docs/README.md](docs/README.md).
+TopoCheck ist eine Erweiterung für Visual Studio Code zum Erstellen grafischer
+Netzwerktopologien und zum Prüfen von Cisco-IOS-Konfigurationen. Geräte,
+Interfaces und unterstützte Protokolle können in einer gemeinsamen Oberfläche
+konfiguriert und lokal gespeichert werden.
 
-This is the README for your extension "topocheck". After writing up a brief description, we recommend including the following sections.
+Das Projekt befindet sich in Entwicklung. Die aktuelle Version ist `0.0.1`.
 
-## Features
+## Funktionen
 
-Describe specific features of your extension including screenshots of your extension in action. Image paths are relative to this README file.
+- **Grafische Topologieansicht:** Router, Switches und PCs hinzufügen,
+  auswählen, verschieben, umbenennen und löschen.
+- **Kabelverbindungen:** Vorhandene Interfaces zweier Geräte verbinden und
+  Verbindungen wieder entfernen.
+- **Gerätekonfiguration:** Name, Hostname, Domain, Benutzername,
+  Zugangskennwörter und Banner im rechten Eigenschaftenpanel bearbeiten.
+- **Interfaces und Protokolle:** IPv4-Adresse, Subnetzmaske, Beschreibung und
+  Aktivierungszustand konfigurieren sowie passende Protokolle auswählen.
+- **Interfacefilter:** Standardmäßig nur verbundene und aktivierte Interfaces
+  anzeigen; über „Alle Interfaces anzeigen“ auch weitere Ports einblenden.
+- **Automatische Portaktivierung:** Beim Verbinden werden die Endpunkte aktiviert,
+  beim Trennen wieder deaktiviert.
+- **Validierung:** Pflichtfelder, Hostnamen, IP-Adressen, Subnetzmasken und
+  Protokollkompatibilität prüfen und Fehler direkt an den Feldern anzeigen.
+- **Konfigurationsprüfung im Editor:** `.cfg`- und `.ios`-Dateien mit dem
+  Cisco-IOS-Parser prüfen und Diagnosen unter „Probleme“ anzeigen.
+- **Lokale Speicherung:** Topologien und Gerätekonfigurationen erneut öffnen;
+  Geräte- und Interface-IDs sowie Kabelzuordnungen erhalten.
 
-For example if there is an image subfolder under your extension project workspace:
+## Voraussetzungen
 
-\!\[feature X\]\(images/feature-x.png\)
+- Visual Studio Code ab Version `1.125.0`
+- Node.js und npm
+- Git zum Klonen und Verwalten des Repositorys
 
-> Tip: Many popular extensions utilize animations. This is an excellent way to show off your extension! We recommend short, focused animations that are easy to follow.
+## Einrichtung und Start
 
-## Requirements
+Das Repository klonen und in Visual Studio Code öffnen:
 
-If you have any requirements or dependencies, add a section describing those and how to install and configure them.
+```powershell
+git clone https://github.com/TopoCheck/TopoCheck-Extension.git
+cd TopoCheck-Extension
+code .
+```
 
-## Extension Settings
+Die Abhängigkeiten installieren und die Erweiterung bauen:
 
-Include if your extension adds any VS Code settings through the `contributes.configuration` extension point.
+```powershell
+npm.cmd install
+npm.cmd run compile
+```
 
-For example:
+Anschließend **F5** drücken und gegebenenfalls **Run Extension** auswählen.
+Visual Studio Code öffnet ein separates Fenster als **Extension Development Host**,
+in dem die Erweiterung getestet werden kann.
 
-This extension contributes the following settings:
+Die Beispiele verwenden `npm.cmd`, damit PowerShell nicht das möglicherweise
+blockierte Skript `npm.ps1` startet. In anderen Shells kann stattdessen `npm`
+verwendet werden.
 
-* `myExtension.enable`: Enable/disable this extension.
-* `myExtension.thing`: Set to `blah` to do something.
+## Verwendung
 
-## Known Issues
+### Topologie erstellen und öffnen
 
-Calling out known issues can help limit users opening duplicate issues against your extension.
+1. Im F5-Fenster die Befehlspalette öffnen: **Strg + Umschalt + P**.
+2. **TopoCheck: Create Topology** ausführen und einen Namen eingeben.
+3. Geräte über die Werkzeugleiste hinzufügen und auf der Zeichenfläche platzieren.
+4. Im Kabelmodus die Interfaces der zu verbindenden Geräte auswählen.
+5. Eine gespeicherte Topologie über **TopoCheck: Open Topology View** erneut öffnen.
 
-## Release Notes
+Die Befehlsnamen sind hier so angegeben, wie sie aktuell in Visual Studio Code
+angezeigt werden.
 
-Users appreciate release notes as you update your extension.
+### Gerät konfigurieren
 
-### 1.0.0
+Ein einfacher Klick auf ein Gerät öffnet das Eigenschaftenpanel. Vorhandene
+Werte werden vorausgefüllt; Änderungen bleiben zunächst als Entwurf erhalten.
 
-Initial release of ...
+- **Speichern** prüft und übernimmt die gesamte Gerätekonfiguration.
+- **Abbrechen** verwirft den Entwurf.
+- Bei einem Gerätewechsel oder beim Schließen mit ungespeicherten Änderungen
+  wird nachgefragt.
+- Pflichtfelder sind mit `*` gekennzeichnet. IP-Adresse und Subnetzmaske sind
+  gemeinsam optional und müssen zusammen angegeben oder zusammen geleert werden.
 
-### 1.0.1
+Beim Ziehen eines Geräts bleibt das Verschieben zuständig. Im Kabelmodus öffnet
+ein Geräteklick die Interfaceauswahl für die Verbindung.
 
-Fixed issue #.
+### Cisco-Konfiguration prüfen
 
-### 1.1.0
+1. Eine `.cfg`- oder `.ios`-Datei im F5-Fenster öffnen.
+2. **TopoCheck: Validate Current Configuration** ausführen.
+3. Die Diagnosen unter **Probleme** mit **Strg + Umschalt + M** ansehen.
 
-Added features X, Y, and Z.
+Die Editorprüfung wird auch beim Öffnen und Ändern unterstützter Dateien
+angestoßen. Beispielkonfigurationen befinden sich unter
+[test-workspace](test-workspace/).
 
----
+## Entwicklungsbefehle
 
-## Following extension guidelines
+| Befehl | Funktion |
+| --- | --- |
+| `npm.cmd run compile` | Typprüfung, Lint und Build der Erweiterung |
+| `npm.cmd run watch` | Dateien überwachen und bei Änderungen neu bauen |
+| `npm.cmd run check-types` | TypeScript-Typen von Extension und Webview prüfen |
+| `npm.cmd run lint` | Code mit ESLint prüfen |
+| `npm.cmd test` | Automatisierte Tests samt vorgeschalteten Buildprüfungen ausführen |
+| `npm.cmd test -- --grep "H2c"` | Tests zur Gerätekonfiguration gezielt ausführen |
+| `npm.cmd run inspect:device-model` | Gespeicherte Beispieldaten als H1c-Modell anzeigen |
+| `npm.cmd run package` | Build für die Veröffentlichung erzeugen |
 
-Ensure that you've read through the extensions guidelines and follow the best practices for creating your extension.
+`npm.cmd run package` erstellt den Produktionsbuild; eine installierbare
+`.vsix`-Datei wird durch diesen Befehl allein nicht erzeugt.
 
-* [Extension Guidelines](https://code.visualstudio.com/api/references/extension-guidelines)
+## Projektstruktur
 
-## Working with Markdown
+```text
+src/
+  analysis/       Topologieanalyse
+  commands/       VS-Code-Befehle
+  core/           Modulregistrierung und Schnittstellen
+  models/         Netzwerkmodell aus H1c
+  modules/        Fachmodule und Topologiespeicherung
+  parser/         Cisco-IOS-Parser
+  shared/         Gemeinsame Typen, Nachrichten und Validierung
+  validation/     Anbindung der Editorprüfung
+  webview/        Grafische Oberfläche
+  test/           Automatisierte Tests nach Fachbereich
 
-You can author your README using Visual Studio Code. Here are some useful editor keyboard shortcuts:
+docs/             Projektdokumentation und Testanleitungen
+media/            Styles und Medien der Webview
+images/           Projektbilder
+scripts/          Entwicklungs- und Inspektionswerkzeuge
+test-workspace/   Beispiele für manuelle Tests
+```
 
-* Split the editor (`Cmd+\` on macOS or `Ctrl+\` on Windows and Linux).
-* Toggle preview (`Shift+Cmd+V` on macOS or `Shift+Ctrl+V` on Windows and Linux).
-* Press `Ctrl+Space` (Windows, Linux, macOS) to see a list of Markdown snippets.
+Die ausführliche Ablageübersicht steht in der
+[Projektdokumentation](docs/README.md).
 
-## For more information
+## Dokumentation
 
-* [Visual Studio Code's Markdown Support](http://code.visualstudio.com/docs/languages/markdown)
-* [Markdown Syntax Reference](https://help.github.com/articles/markdown-basics/)
+- [Backendarchitektur](docs/architecture/README.md)
+- [Gerätekonfiguration H2c](docs/device-configuration/README.md)
+- [Gemeinsame Speicheroperation und Fehlerfalltests](docs/device-configuration/storage.md)
+- [Dokumentationsvorlage und manueller Abnahmeplan](docs/device-configuration/documentation-guide.md)
+- [Word-Dokumentation zu H2c](docs/H2c_Dokumentation.docx)
+- [Cisco-IOS-Parser](docs/parser.md)
+- [Planung des Netzwerkmodells](docs/modeling/README.md)
+- [UML des Netzwerkmodells](docs/uml/network-data-model.md)
 
-**Enjoy!**
+## Aktuelle Grenzen
+
+- Der Parser unterstützt einen Teil der Cisco-IOS-Syntax.
+- Die grafische Gerätekonfiguration verwendet derzeit IPv4.
+- Das Öffnen einer `.cfg`-Datei erzeugt nicht automatisch eine grafische Topologie.
+- Die Protokollauswahl umfasst Auswahl und Aktivierung; eine vollständige
+  Konfigurationsoberfläche für sämtliche Protokolleinstellungen ist nicht vorhanden.
+- Passwortfelder sind in der Oberfläche maskiert. Die Werte werden als Teil der
+  lokalen Topologiedatei gespeichert; eine verschlüsselte Speicherung ist nicht implementiert.
+
+## Lizenz
+
+Die Lizenzbedingungen stehen in [LICENSE](LICENSE).
