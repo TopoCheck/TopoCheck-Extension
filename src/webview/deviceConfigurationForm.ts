@@ -1,7 +1,8 @@
 import type { Device } from "../modules/topology/models";
 import { DeviceType } from "../models/deviceType";
 import { ProtocolType } from "../models/protocolType";
-import { buildConfiguredDevice, compatibleProtocols, configurationOf } from "../shared/deviceConfiguration";
+import { compatibleProtocols, configurationOf } from "../shared/deviceConfiguration";
+import { ConfigurationFieldError, validateDeviceConfiguration } from "../shared/validateDeviceConfiguration";
 import type { ExtensionToWebviewMessage } from "../shared/protocol";
 import { vscodeApi } from "./vscodeApi";
 
@@ -13,6 +14,8 @@ export class DeviceConfigurationForm {
     private error: HTMLElement | undefined;
     private submit: HTMLButtonElement | undefined;
     private readonly disabledBeforeSave = new Map<HTMLInputElement | HTMLSelectElement | HTMLButtonElement, boolean>();
+    private readonly fields = new Map<string, { control: HTMLInputElement; error: HTMLElement }>();
+    private revealInterface: ((index: number) => void) | undefined;
 
     constructor(root: HTMLElement) {
         this.dialog.className = "device-configuration";
@@ -35,7 +38,8 @@ export class DeviceConfigurationForm {
             for (const [control, disabled] of this.disabledBeforeSave) { control.disabled = disabled; }
             this.disabledBeforeSave.clear();
             if (this.submit) { this.submit.textContent = "Speichern"; }
-            if (message.error) { this.showError(message.error); }
+            if (message.validationErrors?.length) { this.showValidationErrors(message.validationErrors); }
+            else if (message.error) { this.showError(message.error); }
             else { this.dialog.close(); }
         }
     }
@@ -48,11 +52,55 @@ export class DeviceConfigurationForm {
         }
     }
 
+    private clearValidationErrors(): void {
+        for (const { control, error } of this.fields.values()) {
+            control.removeAttribute("aria-invalid");
+            error.textContent = "";
+            error.hidden = true;
+        }
+        if (this.error) { this.error.hidden = true; }
+    }
+
+    private showValidationErrors(errors: ConfigurationFieldError[]): void {
+        this.clearValidationErrors();
+        for (const issue of errors) {
+            const field = this.fields.get(issue.field);
+            if (field) {
+                field.control.setAttribute("aria-invalid", "true");
+                field.error.textContent += (field.error.textContent ? "\n" : "") + issue.message;
+                field.error.hidden = false;
+            }
+        }
+        this.showError(errors.map((issue) => issue.message).join("\n"));
+        const first = errors.find((issue) => this.fields.has(issue.field));
+        if (first) {
+            const index = /^interfaces\.(\d+)\./.exec(first.field)?.[1];
+            if (index !== undefined) { this.revealInterface?.(Number(index)); }
+            this.fields.get(first.field)!.control.focus();
+        }
+    }
+
+    private validatedField(key: string, text: string, control: HTMLInputElement): HTMLElement {
+        const wrapper = document.createElement("div");
+        const error = document.createElement("p");
+        error.id = `configuration-field-error-${this.fields.size}`;
+        error.className = "configuration-field-error";
+        error.hidden = true;
+        control.setAttribute("aria-describedby", error.id);
+        this.fields.set(key, { control, error });
+        wrapper.append(field(text, control), error);
+        return wrapper;
+    }
+
     private open(device: Device, otherHostnames: string[]): void {
         this.deviceId = device.id;
         this.pending = false;
+        this.fields.clear();
+        this.revealInterface = undefined;
         const draft = configurationOf(device);
         const form = document.createElement("form");
+        // Use the same German field validation as the extension, including required fields.
+        form.noValidate = true;
         const title = document.createElement("h2");
         title.id = "device-configuration-title";
         title.textContent = `Gerät konfigurieren: ${device.hostname}`;
@@ -72,7 +120,7 @@ export class DeviceConfigurationForm {
         hostname.autocomplete = "off";
         const type = document.createElement("p");
         type.textContent = `Gerätetyp: ${{ router: "Router", switch: "Switch", pc: "PC" }[device.type]}`;
-        general.append(field("Hostname *", hostname), type);
+        general.append(this.validatedField("hostname", "Hostname *", hostname), type);
         form.append(general);
 
         const interfaces = section("Interfaces");
@@ -93,13 +141,16 @@ export class DeviceConfigurationForm {
             mask.placeholder = "z. B. 255.255.255.0";
             for (const control of [ip, mask]) { control.maxLength = 32; control.autocomplete = "off"; }
             row.append(field("Interface aktiviert", enabled),
-                field("IPv4-Adresse (optional)", ip), field("Subnetzmaske (optional)", mask));
+                this.validatedField(`interfaces.${index}.ipAddress`, "IPv4-Adresse (optional)", ip),
+                this.validatedField(`interfaces.${index}.subnetMask`, "Subnetzmaske (optional)", mask));
             rows.push(row);
             return { id: iface.id, enabled, ip, mask };
         });
-        select.addEventListener("change", () => {
-            rows.forEach((row, index) => { row.hidden = String(index) !== select.value; });
-        });
+        this.revealInterface = (selectedIndex) => {
+            select.value = String(selectedIndex);
+            rows.forEach((row, index) => { row.hidden = index !== selectedIndex; });
+        };
+        select.addEventListener("change", () => this.revealInterface!(Number(select.value)));
         if (rows.length) { interfaces.append(field("Interface auswählen", select), ...rows); }
         else {
             const empty = document.createElement("p");
@@ -153,9 +204,9 @@ export class DeviceConfigurationForm {
                 protocols: protocolControls.filter((item) => item.selected.checked)
                     .map(({ type, enabled }) => ({ type, enabled: enabled.checked }))
             };
-            try { buildConfiguredDevice(device, configuration, otherHostnames); }
-            catch (cause) { this.showError(cause instanceof Error ? cause.message : String(cause)); return; }
-            this.error!.hidden = true;
+            const errors = validateDeviceConfiguration(device, configuration, otherHostnames);
+            if (errors.length) { this.showValidationErrors(errors); return; }
+            this.clearValidationErrors();
             this.pending = true;
             form.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>(
                 "input, select, button").forEach((control) => {

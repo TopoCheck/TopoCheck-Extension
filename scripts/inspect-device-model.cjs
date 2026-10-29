@@ -3,6 +3,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { migrateTopology } = require('../out/modules/topology/migrations.js');
 const { toNetworkDevice } = require('../out/shared/deviceConfiguration.js');
+const { DeviceConfigurationValidationError } = require('../out/shared/validateDeviceConfiguration.js');
 
 try {
     const file = path.resolve(process.argv[2] ?? path.join(__dirname, '../test-workspace/h2c-topology.json'));
@@ -21,6 +22,11 @@ try {
     }
     console.log('OK: gespeicherte Konfiguration als H1c-Modell geladen. Quelldatei unverändert.');
 } catch (error) {
-    console.error(`H2c: ${error instanceof Error ? error.message : String(error)}`);
+    if (error instanceof DeviceConfigurationValidationError) {
+        console.error('H2c: Konfiguration ungültig:');
+        for (const issue of error.errors) { console.error(`[${issue.field}] ${issue.message}`); }
+    } else {
+        console.error(`H2c: ${error instanceof Error ? error.message : String(error)}`);
+    }
     process.exitCode = 1;
 }

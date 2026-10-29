@@ -6,6 +6,7 @@ import { findFreeGridPosition } from "./layout";
 import { migrateTopology } from "./migrations";
 import { buildConfiguredDevice, DeviceConfiguration, toNetworkDevice } from "../../shared/deviceConfiguration";
 import type { NetworkDevice } from "../../models/networkDevice";
+import { DeviceConfigurationValidationError } from "../../shared/validateDeviceConfiguration";
 import {
     Connection,
     CURRENT_SCHEMA_VERSION,
@@ -610,9 +611,10 @@ const interfaceNames =
     private findDeviceOrThrow(topology: Topology, deviceId: string): Device {
         const device = topology.devices.find((d) => d.id === deviceId);
         if (!device) {
-            throw new Error(
-                `Device "${deviceId}" existiert nicht in Topology "${topology.id}".`
-            );
+            throw new DeviceConfigurationValidationError([{
+                field: "deviceId", code: "device-not-found",
+                message: `Device "${deviceId}" existiert nicht in Topology "${topology.id}".`
+            }]);
         }
         return device;
     }

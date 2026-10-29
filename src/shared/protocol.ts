@@ -11,6 +11,7 @@ import type { Point } from "./geometry";
 import type { Viewport } from "./viewport.ts";
 import type { DeviceConfiguration } from "./deviceConfiguration";
 import type { Device } from "../modules/topology/models";
+import type { ConfigurationFieldError } from "./validateDeviceConfiguration";
 
 export const TOPOLOGY_VIEW_TYPE = "topocheck.topologyView";
 
@@ -45,7 +46,7 @@ export type ExtensionToWebviewMessage = {
     topology: Topology;
     discardPendingChanges?: boolean;
 } | { type: "editDevice"; device: Device; otherHostnames: string[] }
-  | { type: "configurationResult"; deviceId: string; error?: string };
+  | { type: "configurationResult"; deviceId: string; error?: string; validationErrors?: ConfigurationFieldError[] };
 
 /**
  * Zustand, den VS Code für die Webview aufbewahrt (getState/setState).

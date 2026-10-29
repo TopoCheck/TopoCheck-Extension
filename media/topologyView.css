@@ -675,3 +675,6 @@ kbd {
 .configuration-actions { display: flex; justify-content: flex-end; gap: 8px; }
 .configuration-protocol { display: flex; justify-content: space-between; gap: 16px; }
 .configuration-error { color: var(--vscode-errorForeground); }
+.configuration-error, .configuration-field-error { white-space: pre-line; }
+.configuration-field-error { color: var(--vscode-errorForeground); margin: 4px 0 10px; }
+.device-configuration input[aria-invalid="true"] { border-color: var(--vscode-inputValidation-errorBorder, var(--vscode-errorForeground)); }

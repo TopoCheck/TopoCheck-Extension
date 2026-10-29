@@ -11,6 +11,7 @@ import { TopologyStore } from "../modules/topology/TopologyStore";
 import type { Device } from "../modules/topology/models";
 import { buildConfiguredDevice, configurationOf, toNetworkDevice } from "../shared/deviceConfiguration";
 import { parseWebviewMessage } from "../modules/topology/view/parseWebviewMessage";
+import { DeviceConfigurationValidationError } from "../shared/validateDeviceConfiguration";
 
 suite("H2c device configuration", () => {
     const device: Device = {
@@ -101,7 +102,8 @@ suite("H2c device configuration", () => {
             assert.strictEqual(reloaded.interfaces[0].id, router.interfaces[0].id);
             assert.strictEqual(reloaded.protocols[0].id, router.protocols[0].id);
             assert.deepStrictEqual((await restarted.loadTopology(topology.id)).connections, topology.connections);
-            await assert.rejects(() => store.loadNetworkDevice(topology.id, "missing"), /existiert nicht/);
+            await assert.rejects(() => store.loadNetworkDevice(topology.id, "missing"), (error: unknown) =>
+                error instanceof DeviceConfigurationValidationError && error.errors[0].field === "deviceId");
             const old = JSON.parse(Buffer.from(exampleBytes).toString("utf8"));
             old.schemaVersion = 1;
             delete old.layout;
@@ -191,7 +193,9 @@ suite("H2c device configuration", () => {
             const saved = await store.loadTopology(topology.id);
             draft.hostname = "ShouldNotBeSaved";
             draft.interfaces[0].ipAddress = "999.1.1.1";
-            await assert.rejects(() => store.configureDevice(topology.id, router.id, draft));
+            await assert.rejects(() => store.configureDevice(topology.id, router.id, draft), (error: unknown) =>
+                error instanceof DeviceConfigurationValidationError &&
+                error.errors.some((issue) => issue.field === "interfaces.0.ipAddress"));
             assert.deepStrictEqual(await store.loadTopology(topology.id), saved);
             const clear = configurationOf(configured);
             clear.interfaces[0].ipAddress = "";

@@ -1,5 +1,6 @@
 import { InterfaceType } from "./interfaceType";
 import { SwitchportConfiguration } from "./ciscoProtocols";
+import { isValidIpv4Address, isValidSubnetMask } from "./ipv4";
 
 export interface NetworkInterfaceData {
   id: string;
@@ -50,7 +51,7 @@ export class NetworkInterface {
       throw new Error(`Invalid IPv4 address: ${ipAddress}`);
     }
 
-    if (!isValidIpv4Address(subnetMask)) {
+    if (!isValidSubnetMask(subnetMask)) {
       throw new Error(`Invalid subnet mask: ${subnetMask}`);
     }
 
@@ -80,17 +81,4 @@ function requireNonEmpty(value: string, fieldName: string): string {
   }
 
   return trimmedValue;
-}
-
-function isValidIpv4Address(value: string): boolean {
-  const octets = value.split(".");
-
-  return octets.length === 4 && octets.every((octet) => {
-    if (!/^\d{1,3}$/.test(octet)) {
-      return false;
-    }
-
-    const numericValue = Number(octet);
-    return numericValue >= 0 && numericValue <= 255;
-  });
 }

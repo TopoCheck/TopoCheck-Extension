@@ -18,6 +18,7 @@ import { isHostnameTaken, validateHostname } from "../hostname";
 import { Topology } from "../models";
 import { TopologyChangeType, TopologyStore } from "../TopologyStore";
 import { parseWebviewMessage } from "./parseWebviewMessage";
+import { ConfigurationFieldError, DeviceConfigurationValidationError } from "../../../shared/validateDeviceConfiguration";
 
 export class TopologyViewPanel implements vscode.Disposable {
     /** Höchstens eine Ansicht pro Topologie. */
@@ -225,13 +226,15 @@ export class TopologyViewPanel implements vscode.Disposable {
         switch (message.type) {
             case "configureDevice": {
                 let error: string | undefined;
+                let validationErrors: ConfigurationFieldError[] | undefined;
                 try {
                     await this.store.configureDevice(this.topologyId, message.deviceId, message.configuration);
                 } catch (cause) {
                     error = cause instanceof Error ? cause.message : String(cause);
+                    if (cause instanceof DeviceConfigurationValidationError) { validationErrors = cause.errors; }
                 }
                 await this.panel.webview.postMessage({ type: "configurationResult",
-                    deviceId: message.deviceId, error } satisfies ExtensionToWebviewMessage);
+                    deviceId: message.deviceId, error, validationErrors } satisfies ExtensionToWebviewMessage);
                 return;
             }
             case "ready":

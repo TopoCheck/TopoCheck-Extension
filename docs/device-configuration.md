@@ -49,8 +49,8 @@ Legacy-Standardwerte, ungültige Eingaben/Nachrichten, Hostnamen und Protokolle 
 Speichern, erneutes Laden, stabile IDs, Kabelerhalt und die atomare Ablehnung eines
 ungültigen Entwurfs. Für die Datenanbindung kommen Tests für echte H1c-Klassen beim
 Laden, vorhandene IDs/Interfacetypen und eine Beispieldatei samt Schema-1-Fallback hinzu.
-Stand der Prüfung: Typprüfung und Lint erfolgreich; 149 Tests insgesamt sowie
-9 gezielt mit `--grep H2c` ausgeführte Tests erfolgreich.
+Stand nach der gemeinsamen Feldvalidierung: Typprüfung und Lint erfolgreich;
+160 Tests insgesamt, davon 20 H2c-Tests.
 
 ### Datenanbindung selbst testen (ohne Formular)
 
@@ -103,6 +103,69 @@ Die H2c-Tests schreiben in temporäre Testordner, erstellen eine neue Store-Inst
 laden echte H1c-Objekte und vergleichen Werte, IDs und Kabel. Sie prüfen außerdem,
 dass ungültige Änderungen den gespeicherten Stand nicht verändern. Die Tests räumen
 ihre Testordner anschließend auf.
+
+### Gemeinsame Validierung und Feldfehler
+
+`validateDeviceConfiguration(device, configuration, otherHostnames)` in
+`src/shared/validateDeviceConfiguration.ts` ist eine reine Funktion ohne VS-Code-
+oder DOM-Abhängigkeiten. Sie verändert keine Werte und liefert eine Liste aller
+gefundenen Fehler. Eine leere Liste bedeutet: gültig.
+
+Jeder Fehler enthält `field`, `code` und eine verständliche deutsche `message`:
+
+```json
+{
+  "field": "interfaces.0.subnetMask",
+  "code": "subnet-mask-required",
+  "message": "GigabitEthernet0/0: Bitte zur IP-Adresse eine Subnetzmaske angeben."
+}
+```
+
+Die Interface- und Protokollindizes beziehen sich auf die übergebene Konfiguration.
+Geprüft werden Hostname und Eindeutigkeit, IPv4, vollständige IP/Maskenpaare,
+zusammenhängende Maskenbits, Protokollkompatibilität sowie vorhandene Geräte und
+zugehörige Interfaces. Fehlende Geräte werden als `deviceId` gemeldet. Doppelte,
+fremde oder unvollständige Interfaceauswahlen werden abgelehnt.
+
+Hostname und Protokollkompatibilität verwenden die vorhandenen Regeln. Die
+IPv4-/Maskenregeln stehen gemeinsam in `src/models/ipv4.ts` und werden auch von
+`NetworkInterface.setIpConfiguration` verwendet. Damit lehnt das H1c-Modell jetzt
+selbst nicht zusammenhängende Masken ab. `/0` und `/32` bleiben gültige Masken.
+
+Das Formular markiert betroffene Felder und zeigt die Meldung direkt daneben an.
+Bei einem Fehler auf einem ausgeblendeten Interface wird dieses ausgewählt und
+das fehlerhafte Feld fokussiert. Die Extension prüft erneut gegen den aktuellen
+Speicherstand; `DeviceConfigurationValidationError` transportiert die Feldfehler
+auch zurück zum Formular. Eine ungültige Konfiguration wird nicht gespeichert.
+
+Manuelle Beispiele im F5-Fenster:
+
+| Eingabe beim Speichern | Erwartung |
+| --- | --- |
+| Hostname leer | Fehler direkt am Hostname-Feld |
+| Hostname eines anderen Geräts (auch andere Groß-/Kleinschreibung) | Hostname bereits vergeben |
+| IP `999.1.1.1`, Maske `255.0.255.0` | Beide Felder werden gleichzeitig markiert |
+| IP `10.0.0.1`, Maske leer | Fehlermeldung am Maskenfeld |
+| IP leer, Maske `255.255.255.0` | Fehlermeldung am IP-Feld |
+| IP und Maske leer | Zulässig |
+| IP `10.0.0.1`, Maske `255.255.255.0` | Zulässig |
+| Fehler auf Interface 2, dann Interface 1 auswählen und speichern | Interface 2 wird automatisch angezeigt und der Fehler fokussiert |
+
+Diese Browserfälle wurden am 29.10.2026 mit dem gebauten Bundle in der lokalen
+Testseite geprüft: drei gleichzeitige Fehler an Hostname/IP/Maske und automatische
+Navigation zum Maskenfehler des zweiten Interfaces. Die echte Extension-Speicherung
+und die strukturierten Store-Fehler sind automatisiert geprüft.
+
+Nur die 11 Tests der reinen Feldvalidierung ausführen:
+
+```powershell
+npm.cmd test -- --grep "H2c field validation"
+```
+
+Auch `inspect:device-model` zeigt Fehler mit Feldpfaden an. Beispielsweise erzeugt
+eine Kopie der JSON-Beispieldatei mit leerem Router-Hostnamen und ungültiger IP/Maske
+gleichzeitig Meldungen für `[hostname]`, `[interfaces.0.ipAddress]` und
+`[interfaces.0.subnetMask]`.
 
 Am 29.10.2026 wurde das gebaute Webview-Bundle außerdem in einer lokalen
 Browser-Testseite mit simulierter VS-Code-Nachrichtenanbindung geprüft:
