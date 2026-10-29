@@ -22,7 +22,7 @@ suite("H2c device configuration", () => {
     test("Legacy devices default to enabled interfaces and no protocols", () => {
         const draft = configurationOf(device);
         assert.deepStrictEqual(draft.interfaces[0], {
-            id: "gi0", enabled: true, ipAddress: "", subnetMask: ""
+            id: "gi0", enabled: true, ipAddress: "", subnetMask: "", description: "", layer: 3
         });
         assert.deepStrictEqual(draft.protocols, []);
         assert.strictEqual(buildConfiguredDevice(device, draft, []).id, device.id);
@@ -169,9 +169,18 @@ suite("H2c device configuration", () => {
             const before = await store.loadTopology(topology.id);
             const draft = configurationOf(before.devices.find((item) => item.id === router.id)!);
             draft.hostname = "RouterConfigured";
+            draft.label = "Router Wien";
+            draft.domainName = "schule.at";
+            draft.username = "admin";
+            draft.enableSecret = "test-only-enable";
+            draft.consolePassword = "test-only-console";
+            draft.vtyPassword = "test-only-vty";
+            draft.banner = "Authorized Access Only\nSchulungsnetz";
             draft.interfaces[0].ipAddress = "10.0.0.1";
             draft.interfaces[0].subnetMask = "255.255.255.0";
             draft.interfaces[0].enabled = false;
+            draft.interfaces[0].description = "Uplink zum Switch";
+            draft.interfaces[0].layer = 2;
             draft.protocols = [{ type: ProtocolType.Ospf, enabled: false }];
             await store.configureDevice(topology.id, router.id, draft);
             const loaded = await restarted.loadTopology(topology.id);
@@ -181,6 +190,14 @@ suite("H2c device configuration", () => {
             assert.strictEqual(h1c.interfaces[0].id, router.interfaces[0].id);
             assert.strictEqual(h1c.interfaces[0].enabled, false);
             assert.strictEqual(h1c.protocols[0].enabled, false);
+            assert.strictEqual(configured.label, "Router Wien");
+            assert.strictEqual(h1c.hostname, "RouterConfigured");
+            for (const key of ["domainName", "username", "enableSecret", "consolePassword", "vtyPassword", "banner"] as const) {
+                assert.strictEqual(h1c[key], draft[key]);
+                assert.strictEqual(configured[key], draft[key]);
+            }
+            assert.strictEqual(h1c.interfaces[0].description, "Uplink zum Switch");
+            assert.strictEqual(h1c.interfaces[0].layer, 2);
             assert.strictEqual(configured.hostname, draft.hostname);
             assert.strictEqual(configured.interfaces[0].ipAddress, "10.0.0.1");
             assert.strictEqual(configured.interfaces[0].enabled, false);
@@ -201,10 +218,21 @@ suite("H2c device configuration", () => {
             clear.interfaces[0].ipAddress = "";
             clear.interfaces[0].subnetMask = "";
             clear.protocols = [];
+            clear.domainName = "";
+            clear.username = "";
+            clear.enableSecret = "";
+            clear.consolePassword = "";
+            clear.vtyPassword = "";
+            clear.banner = "";
+            clear.interfaces[0].description = "";
             await store.configureDevice(topology.id, router.id, clear);
             const cleared = (await store.loadTopology(topology.id)).devices.find((item) => item.id === router.id)!;
             assert.strictEqual(cleared.interfaces[0].ipAddress, undefined);
             assert.deepStrictEqual(cleared.protocols, []);
+            for (const key of ["domainName", "username", "enableSecret", "consolePassword", "vtyPassword", "banner"] as const) {
+                assert.strictEqual(cleared[key], undefined);
+            }
+            assert.strictEqual(cleared.interfaces[0].description, undefined);
         } finally {
             store.dispose(); restarted.dispose();
             await vscode.workspace.fs.delete(uri, { recursive: true, useTrash: false });

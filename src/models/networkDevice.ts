@@ -2,8 +2,9 @@ import { DeviceType } from "./deviceType";
 import { NetworkInterface } from "./networkInterface";
 import { NetworkProtocol } from "./networkProtocol";
 import { ProtocolType } from "./protocolType";
+import type { DeviceAccessConfiguration } from "./deviceAccessConfiguration";
 
-export interface NetworkDeviceData {
+export interface NetworkDeviceData extends DeviceAccessConfiguration {
   id: string;
   hostname: string;
   type: DeviceType;
@@ -14,6 +15,12 @@ export class NetworkDevice {
   public readonly id: string;
   public readonly hostname: string;
   public readonly type: DeviceType;
+  public readonly domainName: string | undefined;
+  public readonly username: string | undefined;
+  public readonly enableSecret: string | undefined;
+  public readonly consolePassword: string | undefined;
+  public readonly vtyPassword: string | undefined;
+  public readonly banner: string | undefined;
 
   private readonly interfaceList: NetworkInterface[] = [];
   private readonly protocolList: NetworkProtocol[] = [];
@@ -22,6 +29,12 @@ export class NetworkDevice {
     this.id = requireNonEmpty(data.id, "Device ID");
     this.hostname = requireNonEmpty(data.hostname, "Hostname");
     this.type = data.type;
+    this.domainName = data.domainName;
+    this.username = data.username;
+    this.enableSecret = data.enableSecret;
+    this.consolePassword = data.consolePassword;
+    this.vtyPassword = data.vtyPassword;
+    this.banner = data.banner;
   }
 
   public get interfaces(): readonly NetworkInterface[] {

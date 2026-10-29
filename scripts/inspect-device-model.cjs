@@ -16,6 +16,9 @@ try {
         console.log(JSON.stringify({
             modelClass: model.constructor.name,
             id: model.id, hostname: model.hostname, type: model.type,
+            label: device.label, domainName: model.domainName, username: model.username, banner: model.banner,
+            access: { enableSecretConfigured: Boolean(model.enableSecret),
+                consolePasswordConfigured: Boolean(model.consolePassword), vtyPasswordConfigured: Boolean(model.vtyPassword) },
             interfaces: model.interfaces.map((iface) => ({ modelClass: iface.constructor.name, ...iface })),
             protocols: model.protocols.map((protocol) => ({ modelClass: protocol.constructor.name, ...protocol }))
         }, null, 2));

@@ -11,6 +11,7 @@ export interface NetworkInterfaceData {
   enabled?: boolean;
   ipAddress?: string;
   subnetMask?: string;
+  layer?: 2 | 3;
 }
 
 /** A configurable interface owned by a network device. */
@@ -23,12 +24,14 @@ export class NetworkInterface {
   public enabled: boolean;
   public ipAddress: string | undefined;
   public subnetMask: string | undefined;
+  public layer: 2 | 3 | undefined;
 
   public constructor(data: NetworkInterfaceData) {
     this.id = requireNonEmpty(data.id, "Interface ID");
     this.name = requireNonEmpty(data.name, "Interface name");
     this.type = data.type;
     this.description = data.description;
+    this.layer = data.layer;
     this.switchport = data.switchport === undefined ? undefined : {
       ...data.switchport,
       allowedVlans: data.switchport.allowedVlans?.slice()

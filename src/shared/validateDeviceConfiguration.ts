@@ -39,6 +39,25 @@ export function validateDeviceConfiguration(device: Device | undefined, data: De
     else if (isHostnameTaken(hostname, otherHostnames)) {
         add("hostname", "hostname-taken", `Der Hostname "${hostname}" ist bereits vergeben.`);
     }
+    if (data.label !== undefined && (!data.label.trim() || data.label.trim().length > 128)) {
+        add("label", "label-invalid", "Der Name muss ausgefüllt und darf höchstens 128 Zeichen lang sein.");
+    }
+    const domain = data.domainName?.trim();
+    if (domain && (domain.length > 253 || !domain.split(".").every((part) =>
+        /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$/.test(part)))) {
+        add("domainName", "domain-name-invalid", "Bitte einen gültigen Domain-Namen angeben, z. B. schule.at.");
+    }
+    if (data.username && (data.username.trim().length > 64 || /\s/.test(data.username.trim()))) {
+        add("username", "username-invalid", "Der Benutzername darf höchstens 64 Zeichen und keine Leerzeichen enthalten.");
+    }
+    for (const key of ["enableSecret", "consolePassword", "vtyPassword"] as const) {
+        if (data[key] && (data[key]!.length > 128 || /[\x00-\x1f\x7f]/.test(data[key]!))) {
+            add(key, "password-invalid", "Das Passwort darf höchstens 128 Zeichen und keine Steuerzeichen enthalten.");
+        }
+    }
+    if (data.banner && (data.banner.length > 4096 || /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/.test(data.banner))) {
+        add("banner", "banner-invalid", "Der Banner darf höchstens 4096 Zeichen und keine Steuerzeichen außer Zeilenumbrüchen/Tabulatoren enthalten.");
+    }
 
     const ids = new Set<string>();
     const names = new Set<string>();
@@ -63,6 +82,12 @@ export function validateDeviceConfiguration(device: Device | undefined, data: De
         }
         const ip = input.ipAddress.trim();
         const mask = input.subnetMask.trim();
+        if (input.description && (input.description.length > 240 || /[\x00-\x1f\x7f]/.test(input.description))) {
+            add(`${field}.description`, "description-invalid", `${name}: Die Beschreibung darf höchstens 240 Zeichen und keine Steuerzeichen enthalten.`);
+        }
+        if (input.layer !== undefined && input.layer !== 2 && input.layer !== 3) {
+            add(`${field}.layer`, "layer-invalid", `${name}: Bitte Layer 2 oder Layer 3 auswählen.`);
+        }
         if (ip && !mask) {
             add(`${field}.subnetMask`, "subnet-mask-required", `${name}: Bitte zur IP-Adresse eine Subnetzmaske angeben.`);
         }

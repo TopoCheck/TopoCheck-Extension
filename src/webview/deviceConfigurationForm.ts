@@ -1,37 +1,52 @@
 import type { Device } from "../modules/topology/models";
 import { DeviceType } from "../models/deviceType";
 import { ProtocolType } from "../models/protocolType";
-import { compatibleProtocols, configurationOf } from "../shared/deviceConfiguration";
+import { compatibleProtocols, configurationOf, DeviceConfiguration } from "../shared/deviceConfiguration";
 import { ConfigurationFieldError, validateDeviceConfiguration } from "../shared/validateDeviceConfiguration";
 import type { ExtensionToWebviewMessage } from "../shared/protocol";
+import { DEVICE_TYPE_LABEL, iconHref } from "./icons";
+import { svgElement } from "./svg";
 import { vscodeApi } from "./vscodeApi";
 
-/** The dialog owns a draft; only a successful extension acknowledgement closes it. */
+type FieldControl = HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement;
+type FormControl = FieldControl | HTMLButtonElement;
+
+/** Non-modal inspector: edits are drafts until the extension confirms saving. */
 export class DeviceConfigurationForm {
     private readonly dialog = document.createElement("dialog");
     private pending = false;
+    private dirty = false;
     private deviceId: string | undefined;
     private error: HTMLElement | undefined;
     private submit: HTMLButtonElement | undefined;
-    private readonly disabledBeforeSave = new Map<HTMLInputElement | HTMLSelectElement | HTMLButtonElement, boolean>();
-    private readonly fields = new Map<string, { control: HTMLInputElement; error: HTMLElement }>();
-    private revealInterface: ((index: number) => void) | undefined;
+    private switchNotice: HTMLElement | undefined;
+    private readonly disabledBeforeSave = new Map<FormControl, boolean>();
+    private readonly fields = new Map<string, { control: FieldControl; error: HTMLElement }>();
 
-    constructor(root: HTMLElement) {
+    constructor(private readonly root: HTMLElement) {
         this.dialog.className = "device-configuration";
         this.dialog.setAttribute("aria-labelledby", "device-configuration-title");
-        this.dialog.addEventListener("cancel", (event) => {
-            if (this.pending) { event.preventDefault(); }
+        this.dialog.setAttribute("aria-modal", "false");
+        this.dialog.addEventListener("keydown", (event) => {
+            event.stopPropagation();
+            if (event.key === "Escape") { event.preventDefault(); this.requestClose(); }
         });
-        // Escape must not also clear selection or toggle tools in the canvas.
-        this.dialog.addEventListener("keydown", (event) => event.stopPropagation());
-        root.append(this.dialog);
+        this.dialog.addEventListener("close", () => {
+            this.root.classList.remove("configuration-open");
+        });
+        (root.querySelector(".workspace") ?? root).append(this.dialog);
     }
 
     receive(message: ExtensionToWebviewMessage): void {
         if (message.type === "editDevice") {
-            // A duplicate double-click / delayed response must never replace an unsaved draft.
-            if (!this.dialog.open) { this.open(message.device, message.otherHostnames); }
+            if (this.pending || (this.dialog.open && message.device.id === this.deviceId)) { return; }
+            if (this.dialog.open && this.dirty) {
+                this.confirmDiscard(`Zu „${message.device.label}“ wechseln und ungespeicherte Änderungen verwerfen?`,
+                    () => this.open(message.device, message.otherHostnames, message.connectedInterfaceIds ?? []));
+            } else { this.open(message.device, message.otherHostnames, message.connectedInterfaceIds ?? []); }
+        } else if (message.type === "state" && this.dialog.open && !this.pending &&
+            !message.topology.devices.some((device) => device.id === this.deviceId)) {
+            this.close();
         } else if (message.type === "configurationResult" &&
             this.dialog.open && this.pending && message.deviceId === this.deviceId) {
             this.pending = false;
@@ -40,23 +55,45 @@ export class DeviceConfigurationForm {
             if (this.submit) { this.submit.textContent = "Speichern"; }
             if (message.validationErrors?.length) { this.showValidationErrors(message.validationErrors); }
             else if (message.error) { this.showError(message.error); }
-            else { this.dialog.close(); }
+            else { this.close(); }
         }
     }
 
+    private close(): void {
+        this.dialog.close();
+        this.root.classList.remove("configuration-open");
+        this.dirty = false;
+        // Do not restore focus to an input removed during a device switch.
+        this.root.querySelector<HTMLElement>(".canvas")?.focus({ preventScroll: true });
+    }
+
+    private requestClose(): void {
+        if (this.pending) { return; }
+        if (this.dirty) { this.confirmDiscard("Ungespeicherte Änderungen verwerfen?", () => this.close()); }
+        else { this.close(); }
+    }
+
+    private confirmDiscard(text: string, discard: () => void): void {
+        if (!this.switchNotice) { return; }
+        this.switchNotice.replaceChildren();
+        const message = document.createElement("p");
+        message.textContent = text;
+        const yes = button("Verwerfen");
+        yes.addEventListener("click", discard);
+        const no = button("Weiter bearbeiten");
+        no.addEventListener("click", () => { this.switchNotice!.hidden = true; });
+        this.switchNotice.append(message, yes, no);
+        this.switchNotice.hidden = false;
+        this.switchNotice.scrollIntoView({ block: "nearest" });
+    }
+
     private showError(message: string): void {
-        if (this.error) {
-            this.error.textContent = message;
-            this.error.hidden = false;
-            this.error.focus();
-        }
+        if (this.error) { this.error.textContent = message; this.error.hidden = false; this.error.focus(); }
     }
 
     private clearValidationErrors(): void {
         for (const { control, error } of this.fields.values()) {
-            control.removeAttribute("aria-invalid");
-            error.textContent = "";
-            error.hidden = true;
+            control.removeAttribute("aria-invalid"); error.textContent = ""; error.hidden = true;
         }
         if (this.error) { this.error.hidden = true; }
     }
@@ -73,15 +110,12 @@ export class DeviceConfigurationForm {
         }
         this.showError(errors.map((issue) => issue.message).join("\n"));
         const first = errors.find((issue) => this.fields.has(issue.field));
-        if (first) {
-            const index = /^interfaces\.(\d+)\./.exec(first.field)?.[1];
-            if (index !== undefined) { this.revealInterface?.(Number(index)); }
-            this.fields.get(first.field)!.control.focus();
-        }
+        if (first) { this.fields.get(first.field)!.control.focus(); }
     }
 
-    private validatedField(key: string, text: string, control: HTMLInputElement): HTMLElement {
+    private validatedField(key: string, text: string, control: FieldControl): HTMLElement {
         const wrapper = document.createElement("div");
+        wrapper.className = "configuration-field";
         const error = document.createElement("p");
         error.id = `configuration-field-error-${this.fields.size}`;
         error.className = "configuration-field-error";
@@ -92,153 +126,173 @@ export class DeviceConfigurationForm {
         return wrapper;
     }
 
-    private open(device: Device, otherHostnames: string[]): void {
-        this.deviceId = device.id;
-        this.pending = false;
-        this.fields.clear();
-        this.revealInterface = undefined;
+    private open(device: Device, otherHostnames: string[], connectedIds: string[]): void {
+        this.deviceId = device.id; this.pending = false; this.dirty = false;
+        this.fields.clear(); this.disabledBeforeSave.clear();
         const draft = configurationOf(device);
         const form = document.createElement("form");
-        // Use the same German field validation as the extension, including required fields.
         form.noValidate = true;
-        const title = document.createElement("h2");
-        title.id = "device-configuration-title";
-        title.textContent = `Gerät konfigurieren: ${device.hostname}`;
-        const note = document.createElement("p");
-        note.textContent = "* Pflichtfeld. IP-Adresse und Subnetzmaske sind gemeinsam optional.";
-        this.error = document.createElement("p");
-        this.error.className = "configuration-error";
-        this.error.setAttribute("role", "alert");
-        this.error.tabIndex = -1;
-        this.error.hidden = true;
-        form.append(title, note, this.error);
+        form.addEventListener("input", () => { this.dirty = true; });
+        form.addEventListener("change", () => { this.dirty = true; });
 
-        const general = section("Gerät");
-        const hostname = input("text", draft.hostname);
-        hostname.required = true;
-        hostname.maxLength = 63;
-        hostname.autocomplete = "off";
-        const type = document.createElement("p");
-        type.textContent = `Gerätetyp: ${{ router: "Router", switch: "Switch", pc: "PC" }[device.type]}`;
-        general.append(this.validatedField("hostname", "Hostname *", hostname), type);
-        form.append(general);
+        const header = document.createElement("header");
+        header.className = `configuration-header configuration-${device.type}`;
+        const icon = svgElement("svg", { viewBox: "0 0 64 64", "aria-hidden": "true", class: "configuration-device-icon" });
+        icon.append(svgElement("use", { href: iconHref(device.type) }));
+        const heading = document.createElement("div");
+        const title = document.createElement("h2");
+        title.id = "device-configuration-title"; title.textContent = device.label;
+        const subtitle = document.createElement("span");
+        subtitle.textContent = DEVICE_TYPE_LABEL[device.type];
+        heading.append(title, subtitle);
+        const close = button("×"); close.className = "configuration-close";
+        close.setAttribute("aria-label", "Gerätekonfiguration schließen");
+        close.addEventListener("click", () => this.requestClose());
+        header.append(icon, heading, close);
+        form.append(header);
+
+        const content = document.createElement("div");
+        content.className = "configuration-content";
+        this.switchNotice = document.createElement("div");
+        this.switchNotice.className = "configuration-switch-notice";
+        this.switchNotice.setAttribute("role", "alert"); this.switchNotice.hidden = true;
+        this.error = document.createElement("p");
+        this.error.className = "configuration-error"; this.error.setAttribute("role", "alert");
+        this.error.tabIndex = -1; this.error.hidden = true;
+        const note = document.createElement("p");
+        note.className = "configuration-note"; note.textContent = "* Pflichtfeld · Weitere Angaben optional";
+        content.append(this.switchNotice, this.error, note);
+
+        const label = input("text", draft.label ?? device.hostname, 128);
+        label.required = true;
+        const hostname = input("text", draft.hostname, 63); hostname.required = true;
+        const domain = input("text", draft.domainName ?? "", 253); domain.placeholder = "z. B. schule.at";
+        const username = input("text", draft.username ?? "", 64);
+        const enableSecret = input("password", draft.enableSecret ?? "", 128);
+        const consolePassword = input("password", draft.consolePassword ?? "", 128);
+        const vtyPassword = input("password", draft.vtyPassword ?? "", 128);
+        const banner = document.createElement("textarea");
+        banner.value = draft.banner ?? ""; banner.rows = 3; banner.maxLength = 4096;
+        banner.placeholder = "z. B. Authorized Access Only";
+        content.append(this.validatedField("label", "Name / Label *", label),
+            this.validatedField("hostname", "Hostname *", hostname),
+            this.validatedField("domainName", "Domain-Name", domain),
+            this.validatedField("username", "Benutzername", username),
+            this.validatedField("enableSecret", "Enable Secret", enableSecret),
+            this.validatedField("consolePassword", "Console-Passwort", consolePassword),
+            this.validatedField("vtyPassword", "VTY-Passwort", vtyPassword),
+            this.validatedField("banner", "Banner", banner));
 
         const interfaces = section("Interfaces");
-        const select = document.createElement("select");
-        const rows: HTMLElement[] = [];
+        const helper = document.createElement("p");
+        helper.className = "configuration-note";
+        helper.textContent = "Vorhandene Ports · IP-Adresse und Maske gemeinsam optional";
+        interfaces.append(helper);
         const controls = device.interfaces.map((iface, index) => {
-            const option = document.createElement("option");
-            option.value = String(index);
-            option.textContent = iface.name;
-            select.append(option);
-            const row = document.createElement("div");
-            row.hidden = index !== 0;
-            const enabled = input("checkbox");
-            enabled.checked = draft.interfaces[index].enabled;
-            const ip = input("text", draft.interfaces[index].ipAddress);
-            ip.placeholder = "z. B. 192.168.1.10";
-            const mask = input("text", draft.interfaces[index].subnetMask);
-            mask.placeholder = "z. B. 255.255.255.0";
-            for (const control of [ip, mask]) { control.maxLength = 32; control.autocomplete = "off"; }
-            row.append(field("Interface aktiviert", enabled),
-                this.validatedField(`interfaces.${index}.ipAddress`, "IPv4-Adresse (optional)", ip),
-                this.validatedField(`interfaces.${index}.subnetMask`, "Subnetzmaske (optional)", mask));
-            rows.push(row);
-            return { id: iface.id, enabled, ip, mask };
+            const card = document.createElement("section"); card.className = "configuration-interface-card";
+            const cardHeader = document.createElement("header"); cardHeader.className = "configuration-interface-header";
+            const name = document.createElement("h3"); name.textContent = iface.name;
+            const layer = document.createElement("select");
+            layer.className = "configuration-layer";
+            layer.setAttribute("aria-label", `${iface.name}: Layer`);
+            for (const value of [2, 3]) {
+                const option = document.createElement("option"); option.value = String(value);
+                option.textContent = `Layer ${value}`; layer.append(option);
+            }
+            layer.value = String(draft.interfaces[index].layer);
+            cardHeader.append(name, layer);
+            const status = document.createElement("span"); status.className = "configuration-port-status";
+            status.textContent = connectedIds.includes(iface.id) ? "Verbunden" : "Frei";
+            const enabled = input("checkbox"); enabled.checked = draft.interfaces[index].enabled;
+            enabled.setAttribute("aria-label", `${iface.name}: Aktiviert`);
+            const ip = input("text", draft.interfaces[index].ipAddress, 32); ip.placeholder = "192.168.10.10";
+            ip.setAttribute("aria-label", `${iface.name}: IPv4-Adresse`);
+            const mask = input("text", draft.interfaces[index].subnetMask, 32); mask.placeholder = "255.255.255.0";
+            mask.setAttribute("aria-label", `${iface.name}: Subnetzmaske`);
+            const description = input("text", draft.interfaces[index].description ?? "", 240);
+            description.placeholder = "Beschreibung (optional)";
+            description.setAttribute("aria-label", `${iface.name}: Beschreibung`);
+            card.append(cardHeader, status,
+                this.validatedField(`interfaces.${index}.ipAddress`, "IPv4-Adresse", ip),
+                this.validatedField(`interfaces.${index}.subnetMask`, "Subnetzmaske", mask),
+                this.validatedField(`interfaces.${index}.description`, "Beschreibung", description),
+                field("Aktiviert", enabled));
+            interfaces.append(card);
+            return { id: iface.id, enabled, ip, mask, description, layer };
         });
-        this.revealInterface = (selectedIndex) => {
-            select.value = String(selectedIndex);
-            rows.forEach((row, index) => { row.hidden = index !== selectedIndex; });
-        };
-        select.addEventListener("change", () => this.revealInterface!(Number(select.value)));
-        if (rows.length) { interfaces.append(field("Interface auswählen", select), ...rows); }
-        else {
-            const empty = document.createElement("p");
-            empty.textContent = "Keine Interfaces vorhanden.";
-            interfaces.append(empty);
-        }
-        form.append(interfaces);
+        if (!controls.length) { interfaces.append(document.createTextNode("Keine Interfaces vorhanden.")); }
+        content.append(interfaces);
 
-        const protocols = section("Protokolle (optional)");
+        const protocols = section("Protokolle");
         const protocolControls = compatibleProtocols[device.type as DeviceType].map((type: ProtocolType) => {
             const saved = draft.protocols.find((item) => item.type === type);
-            const selected = input("checkbox");
-            selected.checked = saved !== undefined;
-            const enabled = input("checkbox");
-            enabled.checked = saved?.enabled ?? true;
-            enabled.disabled = !selected.checked;
-            enabled.setAttribute("aria-label", `${type.toUpperCase()} aktiviert`);
+            const selected = input("checkbox"); selected.checked = saved !== undefined;
+            const enabled = input("checkbox"); enabled.checked = saved?.enabled ?? true;
+            enabled.disabled = !selected.checked; enabled.setAttribute("aria-label", `${type.toUpperCase()} aktiviert`);
             selected.addEventListener("change", () => { enabled.disabled = !selected.checked; });
-            const row = document.createElement("div");
-            row.className = "configuration-protocol";
+            const row = document.createElement("div"); row.className = "configuration-protocol";
             row.append(field(type.toUpperCase(), selected), field("Aktiviert", enabled));
             protocols.append(row);
             return { type, selected, enabled };
         });
-        if (!protocolControls.length) {
-            const empty = document.createElement("p");
-            empty.textContent = "Für diesen Gerätetyp sind keine Protokolle verfügbar.";
-            protocols.append(empty);
-        }
-        form.append(protocols);
+        if (!protocolControls.length) { protocols.append(document.createTextNode("Keine Protokolle für diesen Gerätetyp.")); }
+        content.append(protocols);
+        form.append(content);
 
-        const actions = document.createElement("div");
-        actions.className = "configuration-actions";
-        this.submit = document.createElement("button");
-        this.submit.type = "submit";
-        this.submit.textContent = "Speichern";
-        const cancel = document.createElement("button");
-        cancel.type = "button";
-        cancel.textContent = "Abbrechen";
-        cancel.addEventListener("click", () => { if (!this.pending) { this.dialog.close(); } });
-        actions.append(this.submit, cancel);
-        form.append(actions);
+        const actions = document.createElement("footer"); actions.className = "configuration-actions";
+        const cancel = button("Abbrechen"); cancel.className = "configuration-secondary";
+        cancel.addEventListener("click", () => { if (!this.pending) { this.close(); } });
+        this.submit = button("Speichern"); this.submit.type = "submit";
+        actions.append(cancel, this.submit); form.append(actions);
         form.addEventListener("submit", (event) => {
-            event.preventDefault();
-            if (this.pending) { return; }
-            const configuration = {
-                hostname: hostname.value.trim(),
-                interfaces: controls.map(({ id, enabled, ip, mask }) => ({
-                    id, enabled: enabled.checked, ipAddress: ip.value.trim(), subnetMask: mask.value.trim()
+            event.preventDefault(); if (this.pending) { return; }
+            const configuration: DeviceConfiguration = {
+                label: label.value.trim(), hostname: hostname.value.trim(),
+                domainName: domain.value.trim(), username: username.value.trim(),
+                enableSecret: enableSecret.value, consolePassword: consolePassword.value,
+                vtyPassword: vtyPassword.value, banner: banner.value,
+                interfaces: controls.map(({ id, enabled, ip, mask, description, layer }) => ({
+                    id, enabled: enabled.checked, ipAddress: ip.value.trim(), subnetMask: mask.value.trim(),
+                    description: description.value.trim(), layer: Number(layer.value) as 2 | 3
                 })),
                 protocols: protocolControls.filter((item) => item.selected.checked)
                     .map(({ type, enabled }) => ({ type, enabled: enabled.checked }))
             };
             const errors = validateDeviceConfiguration(device, configuration, otherHostnames);
             if (errors.length) { this.showValidationErrors(errors); return; }
-            this.clearValidationErrors();
-            this.pending = true;
-            form.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>(
-                "input, select, button").forEach((control) => {
-                    this.disabledBeforeSave.set(control, control.disabled);
-                    control.disabled = true;
-                });
+            this.clearValidationErrors(); this.pending = true;
+            if (this.switchNotice) { this.switchNotice.hidden = true; }
+            form.querySelectorAll<FormControl>("input, select, textarea, button").forEach((control) => {
+                this.disabledBeforeSave.set(control, control.disabled); control.disabled = true;
+            });
             this.submit!.textContent = "Wird gespeichert …";
             vscodeApi.postMessage({ type: "configureDevice", deviceId: device.id, configuration });
         });
         this.dialog.replaceChildren(form);
-        this.dialog.showModal();
-        hostname.focus();
+        this.root.classList.add("configuration-open");
+        if (!this.dialog.open) { this.dialog.show(); }
+        label.focus({ preventScroll: true });
     }
 }
 
 function section(title: string): HTMLFieldSetElement {
     const fieldset = document.createElement("fieldset");
-    const legend = document.createElement("legend");
-    legend.textContent = title;
-    fieldset.append(legend);
+    const legend = document.createElement("legend"); legend.textContent = title; fieldset.append(legend);
     return fieldset;
 }
-
 function field(text: string, control: HTMLElement): HTMLLabelElement {
     const label = document.createElement("label");
-    label.append(document.createTextNode(text), control);
-    return label;
+    label.className = control instanceof HTMLInputElement && control.type === "checkbox" ? "configuration-checkbox" : "";
+    const caption = document.createElement("span"); caption.textContent = text;
+    label.append(caption, control); return label;
 }
-
-function input(type: string, value = ""): HTMLInputElement {
-    const element = document.createElement("input");
-    element.type = type;
-    element.value = value;
+function input(type: string, value = "", maxLength?: number): HTMLInputElement {
+    const element = document.createElement("input"); element.type = type; element.value = value;
+    element.autocomplete = type === "password" ? "new-password" : "off";
+    if (maxLength !== undefined) { element.maxLength = maxLength; }
     return element;
+}
+function button(text: string): HTMLButtonElement {
+    const result = document.createElement("button"); result.type = "button"; result.textContent = text;
+    return result;
 }

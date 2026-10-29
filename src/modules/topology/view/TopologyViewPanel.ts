@@ -198,6 +198,7 @@ export class TopologyViewPanel implements vscode.Disposable {
             return;
         }
         await this.panel.webview.postMessage({ type: "editDevice", device,
+            connectedInterfaceIds: topology.connections.flatMap((connection) => [connection.interfaceAId, connection.interfaceBId]),
             otherHostnames: topology.devices.filter((item) => item.id !== deviceId)
                 .map((item) => item.hostname) } satisfies ExtensionToWebviewMessage);
     }
@@ -207,7 +208,7 @@ export class TopologyViewPanel implements vscode.Disposable {
     private async onMessage(raw: unknown): Promise<void> {
         const message = parseWebviewMessage(raw);
         if (!message) {
-            console.warn("TopoCheck: ungültige Nachricht aus der Topologieansicht verworfen.", raw);
+            console.warn("TopoCheck: ungültige Nachricht aus der Topologieansicht verworfen.");
             return;
         }
 

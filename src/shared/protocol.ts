@@ -45,7 +45,7 @@ export type ExtensionToWebviewMessage = {
     type: "state";
     topology: Topology;
     discardPendingChanges?: boolean;
-} | { type: "editDevice"; device: Device; otherHostnames: string[] }
+} | { type: "editDevice"; device: Device; otherHostnames: string[]; connectedInterfaceIds?: string[] }
   | { type: "configurationResult"; deviceId: string; error?: string; validationErrors?: ConfigurationFieldError[] };
 
 /**

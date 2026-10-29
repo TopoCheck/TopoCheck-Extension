@@ -6,26 +6,33 @@
 2. `TopoCheck: Create Topology` oder `TopoCheck: Open Topology View` aufrufen.
 3. Ein vorhandenes Gerät einfach anklicken. Alternativ Enter auf dem ausgewählten
    Gerät oder den Kontextmenüeintrag `Configure Device…` verwenden.
-4. Hostname bearbeiten. Der Gerätetyp wird nur angezeigt.
-5. Vorhandene Interfaces auswählen und bei Bedarf IPv4-Adresse und Subnetzmaske
-   gemeinsam eintragen. Der Aktivierungsschalter ist unabhängig von der physischen
-   Portbelegung; das Deaktivieren entfernt keine Kabel.
+4. Im rechten Eigenschaftenpanel Name/Label und Hostname getrennt bearbeiten.
+   Domain-Name, Benutzername, Enable Secret, Console-/VTY-Passwort und Banner sind
+   optional. Der Gerätetyp wird im Kopfbereich angezeigt.
+5. Vorhandene Interfaces stehen als einzelne Karten bereit. Bei Bedarf IPv4-Adresse
+   und Subnetzmaske gemeinsam eintragen, eine Beschreibung ergänzen und Layer 2/3
+   auswählen. Der Aktivierungsschalter ist unabhängig von der physischen Portbelegung;
+   das Deaktivieren entfernt keine Kabel.
 6. Unterstützte Protokolle auswählen und ihren Aktivierungszustand festlegen.
    Abgewählte Protokolle werden beim Speichern entfernt. PCs bieten keine Protokolle.
-7. Speichern übernimmt alle Angaben gemeinsam. Abbrechen oder Escape verwirft den
-   Entwurf. Während des Speicherns bleibt das Formular bis zur Bestätigung gesperrt.
+7. Speichern übernimmt alle Angaben gemeinsam. Abbrechen verwirft den Entwurf.
+   Schließen/Escape und Gerätewechsel fragen bei ungespeicherten Änderungen nach.
+   Während des Speicherns bleibt das Formular bis zur Bestätigung gesperrt.
 
 Der Kabelmodus verwendet weiterhin die bestehende Portauswahl. Ziehen verschiebt
-das Gerät, ohne das Formular zu öffnen. Ein modaler Dialog verhindert, dass ein
-Gerätewechsel einen offenen Entwurf überschreibt.
+das Gerät, ohne das Formular zu öffnen. Das Panel lässt die Zeichenfläche bedienbar.
+Bei einem Gerätewechsel kann man ungespeicherte Änderungen verwerfen oder weiter
+bearbeiten. Auf schmalen Ansichten liegt das Panel am rechten Rand über der Fläche.
 
 ## Daten und Validierung
 
 - `shared/deviceConfiguration.ts` enthält die gemeinsame Validierung und erstellt
   echte H1c-Objekte (`NetworkDevice`, `NetworkInterface`, `NetworkProtocol`).
 - Die Extension validiert Nachrichten und Konfiguration unabhängig vom Browser.
-- `TopologyStore.configureDevice` speichert Hostname, Interface-Konfiguration und
-  Protokolle in einem Schreibvorgang und löst `DeviceConfigUpdated` aus.
+- `TopologyStore.configureDevice` speichert Label, Hostname, Zugangsangaben,
+  Interface-Konfiguration und Protokolle gemeinsam und löst `DeviceConfigUpdated` aus.
+  Das Label ist die sichtbare Bezeichnung; eine Hostname-Änderung im Formular
+  überschreibt dieses Label nicht mehr.
 - `TopologyStore.loadNetworkDevice(topologyId, deviceId)` lädt gespeicherte Daten
   direkt als H1c-Gerät. `toNetworkDevice` ist die zentrale Abbildung für gespeicherte
   Geräte; sie benötigt weder VS Code noch ein Formular. Explizit gespeicherte
@@ -36,6 +43,12 @@ Gerätewechsel einen offenen Entwurf überschreibt.
   ohne diese Felder bleiben lesbar: keine IP-Konfiguration, keine Protokolle,
   Interfaces standardmäßig aktiviert. Die bisherigen Schema-1-Migrationen bleiben
   gültig.
+- Die neuen optionalen Geräteangaben kommen im H1c-`NetworkDevice` an;
+  Interface-Beschreibung und Layer in `NetworkInterface`. Ein fehlender Layer wird
+  beim Switch mit 2, bei Router/PC mit 3 vorbelegt. Der Layer ist hier eine
+  Konfigurationsangabe; es werden daraus keine Cisco-Befehle generiert.
+- Passwortfelder sind maskiert. Der Modell-Inspektionsbefehl zeigt nur an, ob ein
+  Passwort gesetzt ist; ungültige Nachrichten werden ohne ihren Inhalt protokolliert.
 - IP-Adresse und Maske sind gemeinsam optional. IPv4-Oktette und zusammenhängende
   Maskenbits werden geprüft. Hostnamen müssen gültig und eindeutig sein.
 - Die Protokollauswahl verwendet dieselbe Kompatibilitätstabelle wie H1c. Es werden
@@ -50,7 +63,8 @@ Speichern, erneutes Laden, stabile IDs, Kabelerhalt und die atomare Ablehnung ei
 ungültigen Entwurfs. Für die Datenanbindung kommen Tests für echte H1c-Klassen beim
 Laden, vorhandene IDs/Interfacetypen und eine Beispieldatei samt Schema-1-Fallback hinzu.
 Stand nach der gemeinsamen Feldvalidierung: Typprüfung und Lint erfolgreich;
-160 Tests insgesamt, davon 20 H2c-Tests.
+162 Tests insgesamt, davon 22 H2c-Tests. Zusätzliche Tests prüfen die Speicherung,
+das Leeren und das Laden sämtlicher neuer Felder sowie ihre Validierung.
 
 ### Datenanbindung selbst testen (ohne Formular)
 
@@ -133,8 +147,8 @@ IPv4-/Maskenregeln stehen gemeinsam in `src/models/ipv4.ts` und werden auch von
 selbst nicht zusammenhängende Masken ab. `/0` und `/32` bleiben gültige Masken.
 
 Das Formular markiert betroffene Felder und zeigt die Meldung direkt daneben an.
-Bei einem Fehler auf einem ausgeblendeten Interface wird dieses ausgewählt und
-das fehlerhafte Feld fokussiert. Die Extension prüft erneut gegen den aktuellen
+Bei einem Fehler auf einer Interface-Karte wird das fehlerhafte Feld fokussiert
+und in den sichtbaren Bereich gescrollt. Die Extension prüft erneut gegen den aktuellen
 Speicherstand; `DeviceConfigurationValidationError` transportiert die Feldfehler
 auch zurück zum Formular. Eine ungültige Konfiguration wird nicht gespeichert.
 
@@ -149,14 +163,14 @@ Manuelle Beispiele im F5-Fenster:
 | IP leer, Maske `255.255.255.0` | Fehlermeldung am IP-Feld |
 | IP und Maske leer | Zulässig |
 | IP `10.0.0.1`, Maske `255.255.255.0` | Zulässig |
-| Fehler auf Interface 2, dann Interface 1 auswählen und speichern | Interface 2 wird automatisch angezeigt und der Fehler fokussiert |
+| Fehler auf einer nach unten gescrollten Interface-Karte | Fehlerhaftes Feld wird beim Speichern fokussiert und sichtbar |
 
 Diese Browserfälle wurden am 29.10.2026 mit dem gebauten Bundle in der lokalen
 Testseite geprüft: drei gleichzeitige Fehler an Hostname/IP/Maske und automatische
 Navigation zum Maskenfehler des zweiten Interfaces. Die echte Extension-Speicherung
 und die strukturierten Store-Fehler sind automatisiert geprüft.
 
-Nur die 11 Tests der reinen Feldvalidierung ausführen:
+Nur die 13 Tests der reinen Feldvalidierung ausführen:
 
 ```powershell
 npm.cmd test -- --grep "H2c field validation"

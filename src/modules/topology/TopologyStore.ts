@@ -347,11 +347,18 @@ const interfaceNames =
             const model = buildConfiguredDevice(device, data, topology.devices
                 .filter((item) => item.id !== deviceId).map((item) => item.hostname));
             device.hostname = model.hostname;
-            device.label = model.hostname;
+            device.label = data.label?.trim() ?? device.label;
+            device.domainName = model.domainName;
+            device.username = model.username;
+            device.enableSecret = model.enableSecret;
+            device.consolePassword = model.consolePassword;
+            device.vtyPassword = model.vtyPassword;
+            device.banner = model.banner;
             device.interfaces = device.interfaces.map((iface) => {
                 const configured = model.findInterface(iface.id)!;
                 return { ...iface, type: configured.type, enabled: configured.enabled,
-                    ipAddress: configured.ipAddress, subnetMask: configured.subnetMask };
+                    ipAddress: configured.ipAddress, subnetMask: configured.subnetMask,
+                    description: configured.description, layer: configured.layer };
             });
             device.protocols = model.protocols.map(({ id, type, enabled }) => ({ id, type, enabled }));
             await this.persist(topology);

@@ -129,4 +129,35 @@ suite("H2c field validation (without VS Code or DOM)", () => {
             error instanceof DeviceConfigurationValidationError &&
             JSON.stringify(error.errors) === JSON.stringify(errors));
     });
+
+    test("Validates the added inspector fields and never includes passwords in errors", () => {
+        const draft = configurationOf(device);
+        draft.label = "";
+        draft.domainName = "bad domain..at";
+        draft.username = "invalid user";
+        draft.enableSecret = "test-secret\n";
+        draft.consolePassword = "x".repeat(129);
+        draft.vtyPassword = "test-vty\r";
+        draft.banner = "x".repeat(4097);
+        draft.interfaces[0].description = "x".repeat(241);
+        const errors = validateDeviceConfiguration(device, draft);
+        assert.deepStrictEqual(errors.map((issue) => issue.field), [
+            "label", "domainName", "username", "enableSecret", "consolePassword", "vtyPassword", "banner", "interfaces.0.description"
+        ]);
+        assert.ok(!JSON.stringify(errors).includes("test-secret"));
+        assert.ok(!JSON.stringify(errors).includes("test-vty"));
+        Object.assign(draft, { label: "Router Wien", domainName: "4CN.at", username: "admin",
+            enableSecret: "test-only-secret", consolePassword: "", vtyPassword: "", banner: "Line 1\nLine 2" });
+        draft.interfaces[0].description = "Uplink";
+        assert.deepStrictEqual(validateDeviceConfiguration(device, draft), []);
+    });
+
+    test("Rejects malformed optional fields at the Webview boundary", () => {
+        const draft = configurationOf(device);
+        for (const patch of [{ domainName: 123 }, { enableSecret: {} }, { banner: false }, { label: null },
+            { interfaces: [{ ...draft.interfaces[0], layer: 4 }, draft.interfaces[1]] }]) {
+            assert.throws(() => buildConfiguredDevice(device, { ...draft, ...patch } as typeof draft, []),
+                DeviceConfigurationValidationError);
+        }
+    });
 });
