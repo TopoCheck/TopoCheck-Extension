@@ -1,5 +1,8 @@
 # topocheck README
 
+Die Projektunterlagen und die Übersicht der Ordnerstruktur befinden sich unter
+[docs/README.md](docs/README.md).
+
 This is the README for your extension "topocheck". After writing up a brief description, we recommend including the following sections.
 
 ## Features

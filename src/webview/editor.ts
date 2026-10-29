@@ -754,6 +754,8 @@ export class TopologyEditor {
                     if (position) {
                         this.commitMoves(new Map([[gesture.deviceId, position]]));
                     }
+                } else {
+                    vscodeApi.postMessage({ type: "openDevice", deviceId: gesture.deviceId });
                 }
                 return;
             case "pan":

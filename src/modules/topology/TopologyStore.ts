@@ -4,6 +4,9 @@ import { isFinitePoint, roundPoint } from "../../shared/geometry";
 import { isHostnameTaken, nextHostname, validateHostname } from "./hostname";
 import { findFreeGridPosition } from "./layout";
 import { migrateTopology } from "./migrations";
+import { buildConfiguredDevice, DeviceConfiguration, toNetworkDevice } from "../../shared/deviceConfiguration";
+import type { NetworkDevice } from "../../models/networkDevice";
+import { DeviceConfigurationValidationError } from "../../shared/validateDeviceConfiguration";
 import {
     Connection,
     CURRENT_SCHEMA_VERSION,
@@ -61,6 +64,9 @@ export interface NewDeviceInput {
     position?: Position;
 }
 
+/** Injectable file writer so storage failures can be tested against real files. */
+export type TopologyFileWriter = Pick<typeof vscode.workspace.fs, "createDirectory" | "writeFile" | "rename" | "delete">;
+
 /*Verwaltung von Anlegen/Laden/Speichern/Löschen von Topologien. (CRUD)*/
 
 export class TopologyStore implements vscode.Disposable {
@@ -74,7 +80,8 @@ export class TopologyStore implements vscode.Disposable {
 
     private readonly writeQueues = new Map<string, Promise<void>>();
 
-    constructor(private readonly storageUri: vscode.Uri) { }
+    constructor(private readonly storageUri: vscode.Uri,
+        private readonly fileWriter: TopologyFileWriter = vscode.workspace.fs) { }
 
     async createTopology(name: string): Promise<Topology> {
         const now = new Date().toISOString();
@@ -99,6 +106,10 @@ export class TopologyStore implements vscode.Disposable {
     }
 
     async loadTopology(id: string): Promise<Topology> {
+        return this.readTopology(id, true);
+    }
+
+    private async readTopology(id: string, persistRepairs: boolean): Promise<Topology> {
         let raw: Uint8Array;
 
         try {
@@ -120,11 +131,24 @@ export class TopologyStore implements vscode.Disposable {
 
         const topology = migrateTopology(parsed);
 
-        if (this.ensureDeviceInterfaces(topology)) {
+        if (this.ensureDeviceInterfaces(topology) && persistRepairs) {
             await this.persist(topology);
+        }
+        const connected = new Set(topology.connections.flatMap((connection) =>
+            [connection.interfaceAId, connection.interfaceBId]));
+        for (const device of topology.devices) {
+            for (const iface of device.interfaces) { iface.enabled ??= connected.has(iface.id); }
         }
 
         return topology;
+    }
+
+    /** Loads saved configuration directly into the H1c model, without a Webview/draft. */
+    async loadNetworkDevice(topologyId: string, deviceId: string): Promise<NetworkDevice> {
+        const topology = await this.loadTopology(topologyId);
+        const device = this.findDeviceOrThrow(topology, deviceId);
+        return toNetworkDevice(device, topology.devices.filter((item) => item.id !== deviceId)
+            .map((item) => item.hostname));
     }
 
     async listTopologies(): Promise<Topology[]> {
@@ -203,6 +227,7 @@ const interfaceNames =
                     deviceId,
                     name,
                     status: "down",
+                    enabled: false,
                 })),
             };
 
@@ -242,6 +267,9 @@ const interfaceNames =
                     device.interfaces.map((iface) => iface.id)
                 )
             );
+            const removedConnections = topology.connections.filter((connection) =>
+                !remainingInterfaceIds.has(connection.interfaceAId) || !remainingInterfaceIds.has(connection.interfaceBId));
+            for (const connection of removedConnections) { this.setConnectionInterfacesEnabled(topology, connection, false); }
             topology.connections = topology.connections.filter(
                 (connection) =>
                     remainingInterfaceIds.has(connection.interfaceAId) &&
@@ -328,6 +356,37 @@ const interfaceNames =
         });
     }
 
+    /** Snapshot, validate, stage and persist once; emit only after the file replacement succeeds. */
+    async configureDevice(topologyId: string, deviceId: string, data: DeviceConfiguration): Promise<void> {
+        // Callers may continue editing their draft while this request waits in the queue.
+        const configuration = structuredClone(data);
+        await this.withWriteLock(topologyId, async () => {
+            // Even repairing a legacy file must not write anything before validation succeeds.
+            const topology = await this.readTopology(topologyId, false);
+            const device = this.findDeviceOrThrow(topology, deviceId);
+            const model = buildConfiguredDevice(device, configuration, topology.devices
+                .filter((item) => item.id !== deviceId).map((item) => item.hostname));
+            const replacement: Device = {
+                ...device,
+                hostname: model.hostname, label: configuration.label?.trim() ?? device.label,
+                domainName: model.domainName, username: model.username,
+                enableSecret: model.enableSecret, consolePassword: model.consolePassword,
+                vtyPassword: model.vtyPassword, banner: model.banner,
+                interfaces: device.interfaces.map((iface) => {
+                    const configured = model.findInterface(iface.id)!;
+                    return { ...iface, type: configured.type, enabled: configured.enabled,
+                        ipAddress: configured.ipAddress, subnetMask: configured.subnetMask,
+                        description: configured.description, layer: configured.layer };
+                }),
+                protocols: model.protocols.map(({ id, type, enabled }) => ({ id, type, enabled }))
+            };
+            const candidate: Topology = { ...topology,
+                devices: topology.devices.map((item) => item.id === deviceId ? replacement : item) };
+            await this.persist(candidate);
+            this.fireChange({ type: TopologyChangeType.DeviceConfigUpdated, topologyId, deviceId });
+        });
+    }
+
     //Interfaces
     async addInterface(
         topologyId: string,
@@ -343,6 +402,7 @@ const interfaceNames =
                 deviceId,
                 name,
                 status: "down",
+                enabled: false,
             };
 
             device.interfaces.push(iface);
@@ -435,6 +495,7 @@ const interfaceNames =
             };
 
             topology.connections.push(newConnection);
+            this.setConnectionInterfacesEnabled(topology, newConnection, true);
             await this.persist(topology);
             return newConnection;
         });
@@ -455,7 +516,8 @@ const interfaceNames =
         await this.withWriteLock(topologyId, async () => {
             const topology = await this.loadTopology(topologyId);
 
-            if (!topology.connections.some((c) => c.id === connectionId)) {
+            const removedConnection = topology.connections.find((c) => c.id === connectionId);
+            if (!removedConnection) {
                 throw new Error(
                     `Connection "${connectionId}" existiert nicht in Topology "${topologyId}".`
                 );
@@ -464,6 +526,7 @@ const interfaceNames =
             topology.connections = topology.connections.filter(
                 (c) => c.id !== connectionId
             );
+            this.setConnectionInterfacesEnabled(topology, removedConnection, false);
 
             await this.persist(topology);
         });
@@ -529,12 +592,21 @@ const interfaceNames =
                 deviceId: device.id,
                 name,
                 status: "down",
+                enabled: false,
             }));
 
             changed = true;
         }
 
         return changed;
+    }
+
+    private setConnectionInterfacesEnabled(topology: Topology, connection: Connection, enabled: boolean): void {
+        for (const device of topology.devices) {
+            for (const iface of device.interfaces) {
+                if (iface.id === connection.interfaceAId || iface.id === connection.interfaceBId) { iface.enabled = enabled; }
+            }
+        }
     }
 
     //Intern
@@ -580,9 +652,10 @@ const interfaceNames =
     private findDeviceOrThrow(topology: Topology, deviceId: string): Device {
         const device = topology.devices.find((d) => d.id === deviceId);
         if (!device) {
-            throw new Error(
-                `Device "${deviceId}" existiert nicht in Topology "${topology.id}".`
-            );
+            throw new DeviceConfigurationValidationError([{
+                field: "deviceId", code: "device-not-found",
+                message: `Device "${deviceId}" existiert nicht in Topology "${topology.id}".`
+            }]);
         }
         return device;
     }
@@ -592,24 +665,30 @@ const interfaceNames =
     }
 
     private tempFileUri(id: string): vscode.Uri {
-        return vscode.Uri.joinPath(this.storageUri, `${id}.json.tmp`);
+        return vscode.Uri.joinPath(this.storageUri, `${id}.${randomUUID()}.json.tmp`);
     }
 
     private async ensureStorageDir(): Promise<void> {
-        await vscode.workspace.fs.createDirectory(this.storageUri);
+        await this.fileWriter.createDirectory(this.storageUri);
     }
 
     private async persist(topology: Topology): Promise<void> {
         await this.ensureStorageDir();
-        topology.updatedAt = new Date().toISOString();
-
-        const encoded = Buffer.from(JSON.stringify(topology, null, 2), "utf8");
+        const updatedAt = new Date().toISOString();
+        const encoded = Buffer.from(JSON.stringify({ ...topology, updatedAt }, null, 2), "utf8");
         const tempUri = this.tempFileUri(topology.id);
         const finalUri = this.fileUri(topology.id);
 
         // write-then-rename: verhindert, dass ein Absturz mitten im Schreiben eine bereits gespeicherte, gültige Topology-Datei zerstört.
-        await vscode.workspace.fs.writeFile(tempUri, encoded);
-        await vscode.workspace.fs.rename(tempUri, finalUri, { overwrite: true });
+        try {
+            await this.fileWriter.writeFile(tempUri, encoded);
+            await this.fileWriter.rename(tempUri, finalUri, { overwrite: true });
+        } catch (error) {
+            try { await this.fileWriter.delete(tempUri, { useTrash: false }); }
+            catch { /* Cleanup must not hide the original write/rename error. */ }
+            throw error;
+        }
+        topology.updatedAt = updatedAt;
     }
 
     private fireChange(event: TopologyChangeEvent): void {

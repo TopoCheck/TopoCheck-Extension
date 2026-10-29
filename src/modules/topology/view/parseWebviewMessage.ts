@@ -12,6 +12,7 @@ import {
     WebviewToExtensionMessage,
 } from "../../../shared/protocol";
 import type { DeviceType } from "../models";
+import { isDeviceConfiguration } from "../../../shared/deviceConfiguration";
 
 const MAX_ID_LENGTH = 128;
 const MAX_MOVES_PER_MESSAGE = 1000;
@@ -40,6 +41,12 @@ export function parseWebviewMessage(raw: unknown): WebviewToExtensionMessage | u
     const message = raw as Record<string, unknown>;
 
     switch (message.type) {
+        case "configureDevice":
+            if (isId(message.deviceId) && isDeviceConfiguration(message.configuration)) {
+                return { type: "configureDevice", deviceId: message.deviceId,
+                    configuration: message.configuration };
+            }
+            return undefined;
         case "ready":
             return { type: "ready" };
 

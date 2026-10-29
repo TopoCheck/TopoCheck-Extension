@@ -1,5 +1,6 @@
 import { InterfaceType } from "./interfaceType";
 import { SwitchportConfiguration } from "./ciscoProtocols";
+import { isValidIpv4Address, isValidSubnetMask } from "./ipv4";
 
 export interface NetworkInterfaceData {
   id: string;
@@ -10,6 +11,7 @@ export interface NetworkInterfaceData {
   enabled?: boolean;
   ipAddress?: string;
   subnetMask?: string;
+  layer?: 2 | 3;
 }
 
 /** A configurable interface owned by a network device. */
@@ -22,12 +24,14 @@ export class NetworkInterface {
   public enabled: boolean;
   public ipAddress: string | undefined;
   public subnetMask: string | undefined;
+  public layer: 2 | 3 | undefined;
 
   public constructor(data: NetworkInterfaceData) {
     this.id = requireNonEmpty(data.id, "Interface ID");
     this.name = requireNonEmpty(data.name, "Interface name");
     this.type = data.type;
     this.description = data.description;
+    this.layer = data.layer;
     this.switchport = data.switchport === undefined ? undefined : {
       ...data.switchport,
       allowedVlans: data.switchport.allowedVlans?.slice()
@@ -50,7 +54,7 @@ export class NetworkInterface {
       throw new Error(`Invalid IPv4 address: ${ipAddress}`);
     }
 
-    if (!isValidIpv4Address(subnetMask)) {
+    if (!isValidSubnetMask(subnetMask)) {
       throw new Error(`Invalid subnet mask: ${subnetMask}`);
     }
 
@@ -80,17 +84,4 @@ function requireNonEmpty(value: string, fieldName: string): string {
   }
 
   return trimmedValue;
-}
-
-function isValidIpv4Address(value: string): boolean {
-  const octets = value.split(".");
-
-  return octets.length === 4 && octets.every((octet) => {
-    if (!/^\d{1,3}$/.test(octet)) {
-      return false;
-    }
-
-    const numericValue = Number(octet);
-    return numericValue >= 0 && numericValue <= 255;
-  });
 }

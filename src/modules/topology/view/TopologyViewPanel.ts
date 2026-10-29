@@ -18,6 +18,7 @@ import { isHostnameTaken, validateHostname } from "../hostname";
 import { Topology } from "../models";
 import { TopologyChangeType, TopologyStore } from "../TopologyStore";
 import { parseWebviewMessage } from "./parseWebviewMessage";
+import { ConfigurationFieldError, DeviceConfigurationValidationError } from "../../../shared/validateDeviceConfiguration";
 
 export class TopologyViewPanel implements vscode.Disposable {
     /** Höchstens eine Ansicht pro Topologie. */
@@ -196,15 +197,10 @@ export class TopologyViewPanel implements vscode.Disposable {
         if (!device) {
             return;
         }
-        // geplante Schnittstelle: hier öffnet später der Konfigurationsdialog des Geräts
-        await vscode.commands.executeCommand("topocheck.device.configure", {
-            topologyId: this.topologyId,
-            deviceId,
-        }).then(undefined, () =>
-            vscode.window.showInformationMessage(
-                `TopoCheck: Der Konfigurationsdialog für "${device.hostname}" folgt mit Ziel H2c.`
-            )
-        );
+        await this.panel.webview.postMessage({ type: "editDevice", device,
+            connectedInterfaceIds: topology.connections.flatMap((connection) => [connection.interfaceAId, connection.interfaceBId]),
+            otherHostnames: topology.devices.filter((item) => item.id !== deviceId)
+                .map((item) => item.hostname) } satisfies ExtensionToWebviewMessage);
     }
 
     // Kommunikation
@@ -212,7 +208,7 @@ export class TopologyViewPanel implements vscode.Disposable {
     private async onMessage(raw: unknown): Promise<void> {
         const message = parseWebviewMessage(raw);
         if (!message) {
-            console.warn("TopoCheck: ungültige Nachricht aus der Topologieansicht verworfen.", raw);
+            console.warn("TopoCheck: ungültige Nachricht aus der Topologieansicht verworfen.");
             return;
         }
 
@@ -229,6 +225,19 @@ export class TopologyViewPanel implements vscode.Disposable {
 
     private async handle(message: WebviewToExtensionMessage): Promise<void> {
         switch (message.type) {
+            case "configureDevice": {
+                let error: string | undefined;
+                let validationErrors: ConfigurationFieldError[] | undefined;
+                try {
+                    await this.store.configureDevice(this.topologyId, message.deviceId, message.configuration);
+                } catch (cause) {
+                    error = cause instanceof Error ? cause.message : String(cause);
+                    if (cause instanceof DeviceConfigurationValidationError) { validationErrors = cause.errors; }
+                }
+                await this.panel.webview.postMessage({ type: "configurationResult",
+                    deviceId: message.deviceId, error, validationErrors } satisfies ExtensionToWebviewMessage);
+                return;
+            }
             case "ready":
                 await this.postState();
                 return;

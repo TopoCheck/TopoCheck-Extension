@@ -2,7 +2,7 @@ import * as assert from "assert";
 import * as os from "os";
 import * as path from "path";
 import * as vscode from "vscode";
-import { TopologyChangeType, TopologyStore } from "../modules/topology";
+import { TopologyChangeType, TopologyStore } from "../../modules/topology";
 
 suite("TopologyStore Test Suite", () => {
     let storageUri: vscode.Uri;
