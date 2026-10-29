@@ -108,6 +108,7 @@
     }
   },
   "scripts": {
+    "inspect:device-model": "npm run compile-tests && node scripts/inspect-device-model.cjs",
     "vscode:prepublish": "npm run package",
     "compile": "npm run check-types && npm run lint && node esbuild.js",
     "watch": "npm-run-all -p watch:*",

@@ -1,4 +1,7 @@
 # Logs
+# Microsoft Office temporary lock files
+~$*.docx
+
 logs
 *.log
 npm-debug.log*

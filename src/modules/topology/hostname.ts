@@ -24,7 +24,7 @@ export function validateHostname(hostname: string): string | undefined {
         return "Der Hostname darf nicht leer sein.";
     }
     if (hostname.length > MAX_HOSTNAME_LENGTH) {
-        return "Der Hostname darf höchstens ${MAX_HOSTNAME_LENGTH} Zeichen lang sein.";
+        return `Der Hostname darf höchstens ${MAX_HOSTNAME_LENGTH} Zeichen lang sein.`;
     }
     if (!HOSTNAME_PATTERN.test(hostname)) {
         return "Der Hostname muss mit einem Buchstaben beginnen und darf nur Buchstaben, Ziffern und Bindestriche enthalten (nicht am Ende).";

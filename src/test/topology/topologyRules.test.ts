@@ -1,6 +1,6 @@
 import * as assert from "assert";
-import { nextHostname, validateHostname } from "../modules/topology/hostname";
-import { migrateTopology, UnsupportedSchemaVersionError } from "../modules/topology/migrations";
+import { nextHostname, validateHostname } from "../../modules/topology/hostname";
+import { migrateTopology, UnsupportedSchemaVersionError } from "../../modules/topology/migrations";
 
 suite("Topologie-Regeln", () => {
     test("validateHostname prüft die IOS-Regeln", () => {
