@@ -48,6 +48,11 @@ export function configurationOf(device: Device): DeviceConfiguration {
     };
 }
 
+/** Rehydrates a persisted device as real H1c classes, including defaults for old files. */
+export function toNetworkDevice(device: Device, otherHostnames: string[] = []): NetworkDevice {
+    return buildConfiguredDevice(device, configurationOf(device), otherHostnames);
+}
+
 /** Builds a validated H1c model without mutating the stored device or its IDs. */
 export function buildConfiguredDevice(device: Device, data: DeviceConfiguration,
     otherHostnames: string[]): NetworkDevice {
@@ -78,7 +83,7 @@ export function buildConfiguredDevice(device: Device, data: DeviceConfiguration,
             throw new Error(prefix + "Ungültige Subnetzmaske; Netzbits müssen zusammenhängend sein.");
         }
         model.addInterface(new NetworkInterface({
-            id: original.id, name: original.name, type: interfaceTypeOf(original.name),
+            id: original.id, name: original.name, type: original.type ?? interfaceTypeOf(original.name),
             enabled: input.enabled, ipAddress: ip || undefined, subnetMask: mask || undefined
         }));
     }

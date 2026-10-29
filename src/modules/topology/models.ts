@@ -6,6 +6,7 @@
 
 import type { Point } from "../../shared/geometry";
 import type { ProtocolType } from "../../models/protocolType";
+import type { InterfaceType } from "../../models/interfaceType";
 
 export type DeviceType = "router" | "switch" | "pc";
 export type InterfaceStatus = "up" | "down";
@@ -27,6 +28,8 @@ export interface Interface {
     enabled?: boolean;
     ipAddress?: string;
     subnetMask?: string;
+    /** Optional for older files; otherwise preserves the H1c type independently of the name. */
+    type?: InterfaceType;
 }
 
 export interface DeviceConfig {

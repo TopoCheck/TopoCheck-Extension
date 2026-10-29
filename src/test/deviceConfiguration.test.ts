@@ -3,9 +3,13 @@ import * as os from "os";
 import * as path from "path";
 import * as vscode from "vscode";
 import { ProtocolType } from "../models/protocolType";
+import { InterfaceType } from "../models/interfaceType";
+import { NetworkDevice } from "../models/networkDevice";
+import { NetworkInterface } from "../models/networkInterface";
+import { NetworkProtocol } from "../models/networkProtocol";
 import { TopologyStore } from "../modules/topology/TopologyStore";
 import type { Device } from "../modules/topology/models";
-import { buildConfiguredDevice, configurationOf } from "../shared/deviceConfiguration";
+import { buildConfiguredDevice, configurationOf, toNetworkDevice } from "../shared/deviceConfiguration";
 import { parseWebviewMessage } from "../modules/topology/view/parseWebviewMessage";
 
 suite("H2c device configuration", () => {
@@ -32,6 +36,82 @@ suite("H2c device configuration", () => {
         assert.strictEqual(model.interfaces[0].enabled, false);
         assert.strictEqual(model.protocols[0].type, ProtocolType.Ospf);
         assert.strictEqual(device.interfaces[0].ipAddress, undefined);
+    });
+
+    test("Stored devices rehydrate as H1c classes with stable IDs and explicit interface types", () => {
+        const stored: Device = {
+            ...device,
+            interfaces: [{ ...device.interfaces[0], name: "uplink", type: InterfaceType.FastEthernet,
+                enabled: false, ipAddress: "10.0.0.1", subnetMask: "255.255.255.0" }],
+            protocols: [{ id: "existing-ospf-id", type: ProtocolType.Ospf, enabled: false }]
+        };
+        const before = JSON.stringify(stored);
+        const model = toNetworkDevice(stored);
+        assert.ok(model instanceof NetworkDevice);
+        assert.ok(model.interfaces[0] instanceof NetworkInterface);
+        assert.ok(model.protocols[0] instanceof NetworkProtocol);
+        assert.strictEqual(model.id, stored.id);
+        assert.strictEqual(model.interfaces[0].id, stored.interfaces[0].id);
+        assert.strictEqual(model.interfaces[0].type, InterfaceType.FastEthernet);
+        assert.strictEqual(model.protocols[0].id, "existing-ospf-id");
+        assert.strictEqual(model.protocols[0].enabled, false);
+        assert.strictEqual(JSON.stringify(stored), before);
+        model.interfaces[0].clearIpConfiguration();
+        model.protocols[0].enable();
+        const again = toNetworkDevice(stored);
+        assert.strictEqual(again.interfaces[0].ipAddress, "10.0.0.1");
+        assert.strictEqual(again.protocols[0].enabled, false);
+    });
+
+    test("Legacy defaults apply when loading an H1c model directly", () => {
+        const model = toNetworkDevice(device);
+        assert.strictEqual(model.interfaces[0].enabled, true);
+        assert.strictEqual(model.interfaces[0].ipAddress, undefined);
+        assert.strictEqual(model.interfaces[0].subnetMask, undefined);
+        assert.strictEqual(model.interfaces[0].type, InterfaceType.GigabitEthernet);
+        assert.deepStrictEqual(model.protocols, []);
+    });
+
+    test("Example JSON loads directly through the store without a form, including legacy schema 1", async () => {
+        const uri = vscode.Uri.file(path.join(os.tmpdir(), `topocheck-h2c-example-${Date.now()}`));
+        const store = new TopologyStore(uri);
+        const restarted = new TopologyStore(uri);
+        try {
+            const exampleBytes = await vscode.workspace.fs.readFile(vscode.Uri.file(
+                path.resolve(__dirname, "../../test-workspace/h2c-topology.json")));
+            await vscode.workspace.fs.createDirectory(uri);
+            const file = vscode.Uri.joinPath(uri, "h2c-example.json");
+            await vscode.workspace.fs.writeFile(file, exampleBytes);
+            const router = await store.loadNetworkDevice("h2c-example", "router-example");
+            assert.ok(router instanceof NetworkDevice);
+            assert.strictEqual(router.interfaces[0].ipAddress, "10.0.0.1");
+            assert.strictEqual(router.interfaces[1].enabled, false);
+            assert.strictEqual(router.protocols[0].id, "router-example-ospf");
+            const legacy = await store.loadNetworkDevice("h2c-example", "pc-legacy");
+            assert.strictEqual(legacy.interfaces[0].enabled, true);
+            assert.deepStrictEqual(legacy.protocols, []);
+            // Mapping alone must not rewrite the stored JSON.
+            assert.deepStrictEqual(await vscode.workspace.fs.readFile(file), exampleBytes);
+            const topology = await store.loadTopology("h2c-example");
+            const draft = configurationOf(topology.devices[0]);
+            draft.hostname = "RouterSavedWithoutForm";
+            await store.configureDevice(topology.id, topology.devices[0].id, draft);
+            const reloaded = await restarted.loadNetworkDevice(topology.id, topology.devices[0].id);
+            assert.strictEqual(reloaded.hostname, draft.hostname);
+            assert.strictEqual(reloaded.interfaces[0].id, router.interfaces[0].id);
+            assert.strictEqual(reloaded.protocols[0].id, router.protocols[0].id);
+            assert.deepStrictEqual((await restarted.loadTopology(topology.id)).connections, topology.connections);
+            await assert.rejects(() => store.loadNetworkDevice(topology.id, "missing"), /existiert nicht/);
+            const old = JSON.parse(Buffer.from(exampleBytes).toString("utf8"));
+            old.schemaVersion = 1;
+            delete old.layout;
+            await vscode.workspace.fs.writeFile(file, Buffer.from(JSON.stringify(old)));
+            assert.strictEqual((await restarted.loadNetworkDevice("h2c-example", "pc-legacy"))
+                .interfaces[0].enabled, true);
+        } finally {
+            store.dispose(); restarted.dispose();
+            await vscode.workspace.fs.delete(uri, { recursive: true, useTrash: false });
+        }
     });
 
     test("Invalid addresses, masks, incomplete pairs and stale interface IDs are rejected", () => {
@@ -94,6 +174,11 @@ suite("H2c device configuration", () => {
             await store.configureDevice(topology.id, router.id, draft);
             const loaded = await restarted.loadTopology(topology.id);
             const configured = loaded.devices.find((item) => item.id === router.id)!;
+            const h1c = await restarted.loadNetworkDevice(topology.id, router.id);
+            assert.ok(h1c instanceof NetworkDevice);
+            assert.strictEqual(h1c.interfaces[0].id, router.interfaces[0].id);
+            assert.strictEqual(h1c.interfaces[0].enabled, false);
+            assert.strictEqual(h1c.protocols[0].enabled, false);
             assert.strictEqual(configured.hostname, draft.hostname);
             assert.strictEqual(configured.interfaces[0].ipAddress, "10.0.0.1");
             assert.strictEqual(configured.interfaces[0].enabled, false);

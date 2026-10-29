@@ -26,6 +26,10 @@ Gerätewechsel einen offenen Entwurf überschreibt.
 - Die Extension validiert Nachrichten und Konfiguration unabhängig vom Browser.
 - `TopologyStore.configureDevice` speichert Hostname, Interface-Konfiguration und
   Protokolle in einem Schreibvorgang und löst `DeviceConfigUpdated` aus.
+- `TopologyStore.loadNetworkDevice(topologyId, deviceId)` lädt gespeicherte Daten
+  direkt als H1c-Gerät. `toNetworkDevice` ist die zentrale Abbildung für gespeicherte
+  Geräte; sie benötigt weder VS Code noch ein Formular. Explizit gespeicherte
+  Interfacetypen werden erhalten; alte Dateien verwenden die Ableitung aus dem Namen.
 - Geräte-, Interface- und bestehende Protokoll-IDs bleiben erhalten. Kabel und
   Layout werden nicht geändert.
 - Neue Speicherfelder sind optional und ergänzen Schema 2. Bestehende Topologien
@@ -43,7 +47,62 @@ Gerätewechsel einen offenen Entwurf überschreibt.
 `npm.cmd test` prüft zusätzlich zu den bestehenden Tests die Modellabbildung,
 Legacy-Standardwerte, ungültige Eingaben/Nachrichten, Hostnamen und Protokolle sowie
 Speichern, erneutes Laden, stabile IDs, Kabelerhalt und die atomare Ablehnung eines
-ungültigen Entwurfs. Typprüfung, Lint und alle 146 Tests waren erfolgreich.
+ungültigen Entwurfs. Für die Datenanbindung kommen Tests für echte H1c-Klassen beim
+Laden, vorhandene IDs/Interfacetypen und eine Beispieldatei samt Schema-1-Fallback hinzu.
+Stand der Prüfung: Typprüfung und Lint erfolgreich; 149 Tests insgesamt sowie
+9 gezielt mit `--grep H2c` ausgeführte Tests erfolgreich.
+
+### Datenanbindung selbst testen (ohne Formular)
+
+Im Projektterminal ausführen:
+
+```powershell
+npm.cmd run inspect:device-model
+```
+
+Der Befehl kompiliert TypeScript und liest `test-workspace/h2c-topology.json`.
+Er zeigt das geladene H1c-Modell an und verändert die Datei nicht.
+
+| Prüfung | Erwartete Ausgabe |
+| --- | --- |
+| Router | `modelClass: NetworkDevice`, Hostname `RouterExample` |
+| Erstes Router-Interface | `NetworkInterface`, ID `router-example-uplink`, IP `10.0.0.1`, Maske `255.255.255.0` |
+| Zweites Router-Interface | `enabled: false`, keine IP/Maskenwerte |
+| Router-Protokoll | `NetworkProtocol`, ID `router-example-ospf`, Typ `ospf`, aktiviert |
+| Alter PC ohne Konfigurationsfelder | Interface aktiviert, keine IP/Maskenwerte, leere Protokollliste |
+
+Ein einzelnes Gerät auswählen:
+
+```powershell
+npm.cmd run inspect:device-model -- test-workspace/h2c-topology.json pc-legacy
+```
+
+Für eigene Änderungen eine Kopie der Beispieldatei anlegen, diese in VS Code
+bearbeiten und ihren Pfad übergeben:
+
+```powershell
+npm.cmd run inspect:device-model -- "C:\Pfad\zur\Kopie.json"
+```
+
+- Router-Hostname und IP ändern: Die neuen Werte müssen in der Ausgabe erscheinen,
+  Geräte-/Interface-/Protokoll-IDs bleiben gleich.
+- IP `999.1.1.1` oder Maske `255.0.255.0` setzen: Der Befehl muss mit einer
+  verständlichen Fehlermeldung und Exitcode 1 abbrechen.
+- Nur die IP eintragen und die Maske entfernen: Die unvollständige Konfiguration
+  muss abgelehnt werden.
+- Beim Router `vlan` als Protokoll setzen: Unpassendes Protokoll wird abgelehnt.
+- Beim alten PC die optionalen Felder weglassen: Standardwerte werden verwendet.
+
+Die echte Speicher-/Ladekette ohne Formular prüfen:
+
+```powershell
+npm.cmd test -- --grep "H2c"
+```
+
+Die H2c-Tests schreiben in temporäre Testordner, erstellen eine neue Store-Instanz,
+laden echte H1c-Objekte und vergleichen Werte, IDs und Kabel. Sie prüfen außerdem,
+dass ungültige Änderungen den gespeicherten Stand nicht verändern. Die Tests räumen
+ihre Testordner anschließend auf.
 
 Am 29.10.2026 wurde das gebaute Webview-Bundle außerdem in einer lokalen
 Browser-Testseite mit simulierter VS-Code-Nachrichtenanbindung geprüft:

@@ -4,7 +4,8 @@ import { isFinitePoint, roundPoint } from "../../shared/geometry";
 import { isHostnameTaken, nextHostname, validateHostname } from "./hostname";
 import { findFreeGridPosition } from "./layout";
 import { migrateTopology } from "./migrations";
-import { buildConfiguredDevice, DeviceConfiguration } from "../../shared/deviceConfiguration";
+import { buildConfiguredDevice, DeviceConfiguration, toNetworkDevice } from "../../shared/deviceConfiguration";
+import type { NetworkDevice } from "../../models/networkDevice";
 import {
     Connection,
     CURRENT_SCHEMA_VERSION,
@@ -126,6 +127,14 @@ export class TopologyStore implements vscode.Disposable {
         }
 
         return topology;
+    }
+
+    /** Loads saved configuration directly into the H1c model, without a Webview/draft. */
+    async loadNetworkDevice(topologyId: string, deviceId: string): Promise<NetworkDevice> {
+        const topology = await this.loadTopology(topologyId);
+        const device = this.findDeviceOrThrow(topology, deviceId);
+        return toNetworkDevice(device, topology.devices.filter((item) => item.id !== deviceId)
+            .map((item) => item.hostname));
     }
 
     async listTopologies(): Promise<Topology[]> {
@@ -340,7 +349,7 @@ const interfaceNames =
             device.label = model.hostname;
             device.interfaces = device.interfaces.map((iface) => {
                 const configured = model.findInterface(iface.id)!;
-                return { ...iface, enabled: configured.enabled,
+                return { ...iface, type: configured.type, enabled: configured.enabled,
                     ipAddress: configured.ipAddress, subnetMask: configured.subnetMask };
             });
             device.protocols = model.protocols.map(({ id, type, enabled }) => ({ id, type, enabled }));
