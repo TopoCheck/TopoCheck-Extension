@@ -14,7 +14,6 @@ export function activate(context: vscode.ExtensionContext): void {
   const topologyModule = new TopologyModule(context);
 
   registry.register(topologyModule);
-  registry.register(new ConfigModule());
   registry.register(new DiagnosticsModule());
   registry.register(new ExternalApiModule());
   registry.register(new ExampleModule());
