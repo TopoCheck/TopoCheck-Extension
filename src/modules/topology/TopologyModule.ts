@@ -1,6 +1,6 @@
 /**
  *
- * Kapselt die Zuständigketi: Datenmodell, Persistenz und Änderungserkennung für Topologien
+ * Kapselt die Zuständigkeit: Datenmodell, Persistenz und Änderungserkennung für Topologien
  *
  */
 
@@ -9,6 +9,7 @@ import { IModule } from "../../core/interfaces/IModule";
 import { TOPOLOGY_VIEW_TYPE, TopologyViewState } from "../../shared/protocol";
 import { TopologyStore } from "./TopologyStore";
 import { TopologyViewPanel } from "./view/TopologyViewPanel";
+import { ConfigModule } from "../config/ConfigModule";
 
 /** Gespeicherte Topologie-IDs sind UUIDs – alles andere wird nicht als Dateiname verwendet. */
 const TOPOLOGY_ID_PATTERN = /^[A-Za-z0-9-]{1,64}$/;
@@ -23,9 +24,25 @@ export class TopologyModule implements IModule, vscode.Disposable {
     private _store: TopologyStore | undefined;
     private readonly disposables: vscode.Disposable[] = [];
 
-    constructor(private readonly context: vscode.ExtensionContext) { }
+    private configModule: ConfigModule | undefined;
 
-    //Öffentlicher Zugriff auf den Store für andere Module
+    constructor(
+        private readonly context: vscode.ExtensionContext
+    ) { }
+
+    setConfigModule(configModule: ConfigModule): void {
+        this.configModule = configModule;
+    }
+
+    private get config(): ConfigModule {
+        if (!this.configModule) {
+            throw new Error("ConfigModule wurde noch nicht initialisiert.");
+        }
+
+        return this.configModule;
+    }
+
+    // Öffentlicher Zugriff auf den Store für andere Module
     get store(): TopologyStore {
         if (!this._store) {
             throw new Error(
@@ -36,10 +53,20 @@ export class TopologyModule implements IModule, vscode.Disposable {
     }
 
     initialize(): void {
+        const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+
+        if (!workspaceFolder) {
+            void vscode.window.showErrorMessage(
+                "TopoCheck: Bitte öffne zuerst einen Projektordner in VS Code."
+            );
+            return;
+        }
+
         const storageUri = vscode.Uri.joinPath(
-            this.context.globalStorageUri,
+            workspaceFolder.uri,
             "topologies"
         );
+
         this._store = new TopologyStore(storageUri);
         this.disposables.push(this._store);
 
@@ -49,7 +76,12 @@ export class TopologyModule implements IModule, vscode.Disposable {
     }
 
     async openTopologyView(topologyId: string): Promise<void> {
-        await TopologyViewPanel.show(this.context.extensionUri, this.store, topologyId);
+        await TopologyViewPanel.show(
+            this.context.extensionUri,
+            this.store,
+            this.config,
+            topologyId
+        );
     }
 
     private registerCommands(): void {
@@ -59,6 +91,7 @@ export class TopologyModule implements IModule, vscode.Disposable {
                 const name = await vscode.window.showInputBox({
                     prompt: "Name der neuen Topologie",
                 });
+
                 if (!name) {
                     return;
                 }
@@ -78,6 +111,7 @@ export class TopologyModule implements IModule, vscode.Disposable {
                     label: "$(add) Neue Topologie erstellen …",
                     alwaysShow: true,
                 };
+
                 const items: (vscode.QuickPickItem & { id?: string })[] = [
                     createItem,
                     ...topologies.map((topology) => ({
@@ -92,13 +126,16 @@ export class TopologyModule implements IModule, vscode.Disposable {
                     title: "TopoCheck: Topologie öffnen",
                     placeHolder: "Topologie auswählen",
                 });
+
                 if (!picked) {
                     return;
                 }
+
                 if (picked === createItem || !picked.id) {
                     await vscode.commands.executeCommand("topocheck.topology.create");
                     return;
                 }
+
                 await this.openTopologyView(picked.id);
             }
         );
@@ -111,9 +148,11 @@ export class TopologyModule implements IModule, vscode.Disposable {
             (action: (panel: TopologyViewPanel, deviceId: string) => Promise<void>) =>
                 async (args?: DeviceContextArgs) => {
                     const panel = TopologyViewPanel.active;
+
                     if (!panel || typeof args?.deviceId !== "string") {
                         return;
                     }
+
                     try {
                         await action(panel, args.deviceId);
                     } catch (error) {
@@ -142,10 +181,12 @@ export class TopologyModule implements IModule, vscode.Disposable {
         const serializer: vscode.WebviewPanelSerializer<TopologyViewState> = {
             deserializeWebviewPanel: async (panel, state) => {
                 const topologyId = state?.topologyId;
+
                 if (typeof topologyId !== "string" || !TOPOLOGY_ID_PATTERN.test(topologyId)) {
                     panel.dispose();
                     return;
                 }
+
                 try {
                     await this.store.loadTopology(topologyId);
                 } catch {
@@ -153,7 +194,14 @@ export class TopologyModule implements IModule, vscode.Disposable {
                     panel.dispose();
                     return;
                 }
-                TopologyViewPanel.revive(panel, this.context.extensionUri, this.store, topologyId);
+
+                TopologyViewPanel.revive(
+                    panel,
+                    this.context.extensionUri,
+                    this.store,
+                    this.config,
+                    topologyId
+                );
             },
         };
 
@@ -164,6 +212,7 @@ export class TopologyModule implements IModule, vscode.Disposable {
 
     dispose(): void {
         TopologyViewPanel.disposeAll();
+
         for (const disposable of this.disposables) {
             disposable.dispose();
         }

@@ -12,6 +12,7 @@ import type { Device } from "../../modules/topology/models";
 import { buildConfiguredDevice, configurationOf, toNetworkDevice } from "../../shared/deviceConfiguration";
 import { parseWebviewMessage } from "../../modules/topology/view/parseWebviewMessage";
 import { DeviceConfigurationValidationError } from "../../shared/validateDeviceConfiguration";
+import { RipProtocol, OspfProtocol } from "../../models/ciscoProtocols";
 
 suite("H2c device configuration", () => {
     const device: Device = {
@@ -45,8 +46,10 @@ suite("H2c device configuration", () => {
     test("Stored devices rehydrate as H1c classes with stable IDs and explicit interface types", () => {
         const stored: Device = {
             ...device,
-            interfaces: [{ ...device.interfaces[0], name: "uplink", type: InterfaceType.FastEthernet,
-                enabled: false, ipAddress: "10.0.0.1", subnetMask: "255.255.255.0" }],
+            interfaces: [{
+                ...device.interfaces[0], name: "uplink", type: InterfaceType.FastEthernet,
+                enabled: false, ipAddress: "10.0.0.1", subnetMask: "255.255.255.0"
+            }],
             protocols: [{ id: "existing-ospf-id", type: ProtocolType.Ospf, enabled: false }]
         };
         const before = JSON.stringify(stored);
@@ -157,6 +160,92 @@ suite("H2c device configuration", () => {
             { ...message.configuration, protocols: [{ type: "unknown", enabled: true }] },
             { ...message.configuration, interfaces: [{ id: "gi0", enabled: "yes", ipAddress: "", subnetMask: "" }] }]) {
             assert.strictEqual(parseWebviewMessage({ ...message, configuration }), undefined);
+        }
+    });
+
+    test("RIP and OSPF configurations survive saving and reloading", async () => {
+        const uri = vscode.Uri.file(
+            path.join(os.tmpdir(), `topocheck-routing-${Date.now()}`)
+        );
+        const store = new TopologyStore(uri);
+        const restarted = new TopologyStore(uri);
+
+        try {
+            const topology = await store.createTopology("Routing persistence");
+            const router = await store.addDevice(topology.id, { type: "router" });
+
+            const draft = configurationOf(
+                (await store.loadTopology(topology.id)).devices
+                    .find((item) => item.id === router.id)!
+            );
+
+            draft.protocols = [
+                {
+                    type: ProtocolType.Rip,
+                    enabled: true,
+                    rip: {
+                        networks: [{ address: "10.0.0.0" }]
+                    }
+                },
+                {
+                    type: ProtocolType.Ospf,
+                    enabled: true,
+                    ospf: {
+                        processes: [{
+                            processId: 1,
+                            routerId: "1.1.1.1",
+                            networks: [{
+                                address: "10.0.0.0",
+                                wildcardMask: "0.0.0.255",
+                                area: "0"
+                            }],
+                            passiveInterfaceDefault: true,
+                            passiveInterfaces: {
+                                GigabitEthernet0: false
+                            }
+                        }]
+                    }
+                }
+            ];
+
+            await store.configureDevice(topology.id, router.id, draft);
+
+            const loaded = await restarted.loadNetworkDevice(topology.id, router.id);
+
+            const loadedRip = loaded.protocols.find(
+                (protocol): protocol is RipProtocol => protocol instanceof RipProtocol
+            );
+            const loadedOspf = loaded.protocols.find(
+                (protocol): protocol is OspfProtocol => protocol instanceof OspfProtocol
+            );
+
+            assert.ok(loadedRip);
+            assert.ok(loadedOspf);
+
+            assert.deepStrictEqual(loadedRip.networks, [
+                { address: "10.0.0.0" }
+            ]);
+
+            assert.deepStrictEqual(loadedOspf.processes, [{
+                processId: 1,
+                routerId: "1.1.1.1",
+                networks: [{
+                    address: "10.0.0.0",
+                    wildcardMask: "0.0.0.255",
+                    area: "0"
+                }],
+                passiveInterfaceDefault: true,
+                passiveInterfaces: {
+                    GigabitEthernet0: false
+                }
+            }]);
+        } finally {
+            store.dispose();
+            restarted.dispose();
+            await vscode.workspace.fs.delete(uri, {
+                recursive: true,
+                useTrash: false
+            });
         }
     });
 

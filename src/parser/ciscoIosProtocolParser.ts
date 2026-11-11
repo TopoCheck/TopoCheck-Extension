@@ -1,6 +1,15 @@
 import {
-  DeviceType, NetworkInterface, NetworkProtocol, OspfProcessConfiguration,
-  OspfProtocol, StaticRouteConfiguration, StaticRouteProtocol, VlanConfiguration, VlanProtocol
+  DeviceType,
+  NetworkInterface,
+  NetworkProtocol,
+  OspfProcessConfiguration,
+  OspfProtocol,
+  RipNetworkConfiguration,
+  RipProtocol,
+  StaticRouteConfiguration,
+  StaticRouteProtocol,
+  VlanConfiguration,
+  VlanProtocol
 } from "../models";
 
 export type ReportDiagnostic = (severity: "warning" | "error", message: string) => void;
@@ -9,31 +18,43 @@ export type ReportDiagnostic = (severity: "warning" | "error", message: string) 
 export class CiscoIosProtocolParser {
   private readonly vlan: VlanProtocol;
   private readonly ospf: OspfProtocol;
+  private readonly rip: RipProtocol;
   private readonly routes: StaticRouteProtocol;
+
   private currentVlan: VlanConfiguration | undefined;
   private currentOspf: OspfProcessConfiguration | undefined;
+  private currentRip = false;
   private blocked = false;
 
   public constructor(private readonly deviceType: DeviceType, deviceId: string) {
     this.vlan = new VlanProtocol(`${deviceId}:vlan`);
     this.ospf = new OspfProtocol(`${deviceId}:ospf`);
     this.routes = new StaticRouteProtocol(`${deviceId}:static-route`);
+    this.rip = new RipProtocol(`${deviceId}:rip`);
   }
 
   public resetContext(): void {
     this.currentVlan = undefined;
     this.currentOspf = undefined;
+    this.currentRip = false;
     this.blocked = false;
   }
 
-  public get context(): "vlan" | "ospf" | "global" {
-    return this.currentVlan ? "vlan" : this.currentOspf ? "ospf" : "global";
+  public get context(): "vlan" | "ospf" | "rip" | "global" {
+    return this.currentVlan
+      ? "vlan"
+      : this.currentOspf
+        ? "ospf"
+        : this.currentRip
+          ? "rip"
+          : "global";
   }
 
   public get protocols(): NetworkProtocol[] {
     return [
       ...(this.vlan.vlans.length ? [this.vlan] : []),
       ...(this.ospf.processes.length ? [this.ospf] : []),
+      ...(this.rip.networks.length ? [this.rip] : []),
       ...(this.routes.routes.length ? [this.routes] : [])
     ];
   }
@@ -59,6 +80,19 @@ export class CiscoIosProtocolParser {
         this.vlan.vlans.push(this.currentVlan);
       }
       this.blocked = false;
+      return true;
+    }
+    if (/^router\s+rip$/.test(command)) {
+      this.resetContext();
+      this.blocked = true;
+
+      if (this.deviceType !== DeviceType.Router) {
+        report("error", "RIP requires a router in the H1c model.");
+      } else {
+        this.currentRip = true;
+        this.blocked = false;
+      }
+
       return true;
     }
     if (/^router\s+ospf(?:\s|$)/.test(command)) {
@@ -92,7 +126,8 @@ export class CiscoIosProtocolParser {
       return true;
     }
 
-    const childCommand = /^(?:name|network|router-id|(?:no\s+)?passive-interface)(?:\s|$)/.test(command);
+    const childCommand =
+      /^(?:name|network|router-id|version|no\s+auto-summary|(?:no\s+)?passive-interface)(?:\s|$)/.test(command);
     if (!indented && !childCommand) {
       this.resetContext();
     }
@@ -111,6 +146,10 @@ export class CiscoIosProtocolParser {
     }
     if (this.currentOspf) {
       this.parseOspf(command, this.currentOspf, report);
+      return true;
+    }
+    if (this.currentRip) {
+      this.parseRip(command, report);
       return true;
     }
     if (childCommand) {
@@ -154,6 +193,38 @@ export class CiscoIosProtocolParser {
     }
     if (!this.routes.routes.some((existing) => JSON.stringify(existing) === JSON.stringify(route))) {
       this.routes.routes.push(route);
+    }
+  }
+
+  private parseRip(command: string, report: ReportDiagnostic): void {
+    if (command === "version 2" || command === "no auto-summary") {
+      return;
+    }
+
+    const match = /^network\s+(\S+)$/.exec(command);
+
+    if (match && isIpv4(match[1])) {
+      const network: RipNetworkConfiguration = {
+        address: match[1]
+      };
+
+      if (!this.rip.networks.some(
+        (item) => item.address === network.address
+      )) {
+        this.rip.networks.push(network);
+      }
+
+      return;
+    }
+
+    if (/^version(?:\s|$)/.test(command)) {
+      report("error", "RIP unterstützt hier nur: version 2.");
+    } else if (/^no\s+auto-summary$/.test(command)) {
+      return;
+    } else if (/^network(?:\s|$)/.test(command)) {
+      report("error", "Ungültiges RIP-Netzwerk. Erwartet: network <IPv4-Adresse>.");
+    } else {
+      report("warning", `Nicht unterstützter RIP-Befehl: ${command}`);
     }
   }
 

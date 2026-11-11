@@ -105,16 +105,119 @@ export function validateDeviceConfiguration(device: Device | undefined, data: De
         add("interfaces", "interfaces-incomplete", "Die Interfaceauswahl ist unvollständig oder veraltet. Bitte das Formular erneut öffnen.");
     }
 
+
     const protocols = new Set<ProtocolType>();
+
     data.protocols.forEach((protocol, index) => {
-        const field = `protocols.${index}.type`;
+        const field = `protocols.${index}`;
+
         if (!Object.values(ProtocolType).includes(protocol.type)) {
-            add(field, "protocol-unknown", "Das ausgewählte Protokoll wird nicht unterstützt.");
-        } else if (validDeviceType && !compatibleProtocols[device.type as DeviceType].includes(protocol.type)) {
-            add(field, "protocol-incompatible", `Das Protokoll ${protocol.type.toUpperCase()} ist für dieses Gerät nicht verfügbar.`);
+            add(`${field}.type`, "protocol-unknown", "Das ausgewählte Protokoll wird nicht unterstützt.");
+        } else if (
+            validDeviceType &&
+            !compatibleProtocols[device.type as DeviceType].includes(protocol.type)
+        ) {
+            add(`${field}.type`, "protocol-incompatible", `Das Protokoll ${protocol.type.toUpperCase()} ist für dieses Gerät nicht verfügbar.`);
         }
-        if (protocols.has(protocol.type)) { add(field, "protocol-duplicate", "Ein Protokoll darf nur einmal ausgewählt werden."); }
+
+        if (protocols.has(protocol.type)) {
+            add(`${field}.type`, "protocol-duplicate", "Ein Protokoll darf nur einmal ausgewählt werden.");
+        }
+
         protocols.add(protocol.type);
+
+        // RIP-Konfiguration prüfen
+        if (protocol.type === ProtocolType.Rip && protocol.enabled) {
+            const networks = protocol.rip?.networks ?? [];
+
+            if (networks.length === 0) {
+                add(
+                    `${field}.rip.networks`,
+                    "rip-network-required",
+                    "Für RIP muss mindestens eine Netzwerkadresse angegeben werden."
+                );
+            }
+
+            networks.forEach((network, networkIndex) => {
+                if (!isValidIpv4Address(network.address)) {
+                    add(
+                        `${field}.rip.networks.${networkIndex}.address`,
+                        "rip-network-invalid",
+                        "Bitte eine gültige IPv4-Netzwerkadresse angeben."
+                    );
+                }
+            });
+        }
+
+        // OSPF-Konfiguration prüfen
+        if (protocol.type === ProtocolType.Ospf && protocol.enabled) {
+            const processes = protocol.ospf?.processes ?? [];
+
+            if (processes.length === 0) {
+                add(
+                    `${field}.ospf.processes`,
+                    "ospf-process-required",
+                    "Für OSPF muss mindestens ein Prozess vorhanden sein."
+                );
+            }
+
+            processes.forEach((process, processIndex) => {
+                const processField = `${field}.ospf.processes.${processIndex}`;
+
+                if (
+                    process.routerId !== undefined &&
+                    process.routerId.trim() !== "" &&
+                    !isValidIpv4Address(process.routerId)
+                ) {
+                    add(
+                        `${processField}.routerId`,
+                        "ospf-router-id-invalid",
+                        "Bitte eine gültige OSPF Router-ID angeben."
+                    );
+                }
+
+                if (process.networks.length === 0) {
+                    add(
+                        `${processField}.networks`,
+                        "ospf-network-required",
+                        "Für jeden OSPF-Prozess muss mindestens ein Netzwerk angegeben werden."
+                    );
+                }
+
+                process.networks.forEach((network, networkIndex) => {
+                    const networkField = `${processField}.networks.${networkIndex}`;
+
+                    if (!isValidIpv4Address(network.address)) {
+                        add(
+                            `${networkField}.address`,
+                            "ospf-network-invalid",
+                            "Bitte eine gültige IPv4-Netzwerkadresse angeben."
+                        );
+                    }
+
+                    if (!isValidIpv4Address(network.wildcardMask)) {
+                        add(
+                            `${networkField}.wildcardMask`,
+                            "ospf-wildcard-invalid",
+                            "Bitte eine gültige Wildcard-Maske angeben."
+                        );
+                    }
+
+                    if (
+                        !/^\d+$/.test(network.area) ||
+                        Number(network.area) > 4294967295
+                    ) {
+                        add(
+                            `${networkField}.area`,
+                            "ospf-area-invalid",
+                            "Die OSPF Area muss eine Zahl zwischen 0 und 4294967295 sein."
+                        );
+                    }
+                });
+            });
+        }
     });
+
     return errors;
+
 }

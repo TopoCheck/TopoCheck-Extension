@@ -1,4 +1,4 @@
-export type CommandContext = "interface" | "vlan" | "ospf" | "global";
+export type CommandContext = "interface" | "vlan" | "ospf" | "rip" | "global";
 interface Keyword {
   word: string;
   children?: Keyword[];
@@ -15,6 +15,11 @@ const switchport = key("switchport", [
 ]);
 const interfaceChildren = [key("description", undefined, "text"), key("shutdown"), switchport];
 const ospfChildren = [key("router-id"), key("network"), key("passive-interface", [key("default")], "interface")];
+const ripChildren = [
+  key("version"),
+  key("network"),
+  key("no", [key("auto-summary")])
+];
 
 /** Resolve unique keyword prefixes within the supported grammar, not the complete IOS CLI. */
 export function expandCiscoCommand(command: string, context: CommandContext): {
@@ -23,12 +28,16 @@ export function expandCiscoCommand(command: string, context: CommandContext): {
   const original = command;
   const ip = key("ip", [address, key("route", undefined, "route")]);
   const no = key("no", [key("shutdown"), key("description"), key("switchport"),
-    key("ip", [address]), key("passive-interface", [key("default")], "interface")]);
+  key("ip", [address]), key("passive-interface", [key("default")], "interface")]);
   const globals = [key("hostname"), key("interface", undefined, "interface"), ip, no,
-    key("router", [key("ospf")]), key("vlan"), key("end"), key("exit"),
-    key("configure", [key("terminal")]), key("banner", undefined, "text")];
-  const local = context === "interface" ? interfaceChildren : context === "ospf" ? ospfChildren :
-    context === "vlan" ? [key("name")] : [];
+  key("router", [key("ospf"), key("rip")]), key("vlan"), key("end"), key("exit"),
+  key("configure", [key("terminal")]), key("banner", undefined, "text")];
+  const local =
+    context === "interface" ? interfaceChildren :
+      context === "ospf" ? ospfChildren :
+        context === "rip" ? ripChildren :
+          context === "vlan" ? [key("name")] :
+            [];
   let choices = [...globals, ...local];
   const tokens = [...command.matchAll(/\S+/g)];
   const expanded: string[] = [];
@@ -64,7 +73,13 @@ export function expandCiscoCommand(command: string, context: CommandContext): {
       break;
     }
     if (selected.word === "network") {
-      // network <address> <wildcard> area <value>: values are never abbreviated.
+      if (context === "rip") {
+        // RIP: network <address>
+        expanded.push(...tokens.slice(index + 1).map((item) => item[0]));
+        break;
+      }
+
+      // OSPF: network <address> <wildcard> area <value>
       expanded.push(...tokens.slice(index + 1, index + 3).map((item) => item[0]));
       index += Math.min(2, tokens.length - index - 1);
       choices = [key("area")];

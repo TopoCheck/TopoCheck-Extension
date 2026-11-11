@@ -284,21 +284,204 @@ export class DeviceConfigurationForm {
         this.updateInterfaceVisibility();
         content.append(interfaces);
 
+
         const protocols = section("Protokolle");
-        const protocolControls = compatibleProtocols[device.type as DeviceType].map((type: ProtocolType) => {
+
+        const protocolControls = compatibleProtocols[device.type as DeviceType].map((type: ProtocolType, protocolIndex: number) => {
             const saved = draft.protocols.find((item) => item.type === type);
-            const selected = input("checkbox"); selected.checked = saved !== undefined;
-            const enabled = input("checkbox"); enabled.checked = saved?.enabled ?? true;
-            enabled.disabled = !selected.checked; enabled.setAttribute("aria-label", `${type.toUpperCase()} aktiviert`);
-            selected.addEventListener("change", () => { enabled.disabled = !selected.checked; });
-            const row = document.createElement("div"); row.className = "configuration-protocol";
-            row.append(field(type.toUpperCase(), selected), field("Aktiviert", enabled));
+            const savedProcesses = saved?.ospf?.processes ?? [];
+
+            const enabled = input("checkbox");
+            enabled.checked = saved?.enabled ?? false;
+            enabled.setAttribute("aria-label", `${type.toUpperCase()} aktiviert`);
+
+            const settings = document.createElement("div");
+            settings.className = "configuration-protocol-settings";
+            settings.hidden = !enabled.checked;
+
+            const row = document.createElement("div");
+            row.className = "configuration-protocol";
+
+            row.append(field(`${type.toUpperCase()} aktiviert`, enabled));
             protocols.append(row);
-            return { type, selected, enabled };
+
+            enabled.addEventListener("change", () => {
+                settings.hidden = !enabled.checked;
+            });
+
+            const ripNetworkControls: HTMLInputElement[] = [];
+
+            const ospfNetworkControls: {
+                address: HTMLInputElement;
+                wildcardMask: HTMLInputElement;
+                area: HTMLInputElement;
+            }[] = [];
+
+            const passiveInterfaceControls = new Map<string, HTMLInputElement>();
+
+            if (type === ProtocolType.Rip) {
+                const heading = document.createElement("h4");
+                heading.textContent = "RIP-Einstellungen";
+                settings.append(heading);
+
+                const networks = document.createElement("div");
+                networks.className = "configuration-network-list";
+
+                const savedNetworks = saved?.rip?.networks ?? [];
+
+                const networkEntries = savedNetworks.length > 0
+                    ? savedNetworks
+                    : [{ address: "" }];
+
+                networkEntries.forEach((network, index) => {
+                    const address = input("text", network.address, 15);
+                    address.placeholder = "z. B. 192.168.10.0";
+
+                    ripNetworkControls.push(address);
+
+                    networks.append(
+                        this.validatedField(
+                            `protocols.${protocolIndex}.rip.networks.${index}.address`,
+                            "Netzwerkadresse *",
+                            address
+                        )
+                    );
+                });
+
+                settings.append(networks);
+            }
+
+            if (type === ProtocolType.Ospf) {
+                const heading = document.createElement("h4");
+                heading.textContent = "OSPF-Einstellungen";
+                settings.append(heading);
+
+                const process = saved?.ospf?.processes?.[0];
+
+                const processId = input("number", String(process?.processId ?? 1));
+                processId.min = "1";
+                processId.max = "65535";
+
+                const routerId = input("text", process?.routerId ?? "", 15);
+                routerId.placeholder = "Automatische Auswahl";
+
+                settings.append(
+                    this.validatedField(
+                        `protocols.${protocolIndex}.ospf.processes.0.processId`,
+                        "Process ID (Standard: 1)",
+                        processId
+                    ),
+                    this.validatedField(
+                        `protocols.${protocolIndex}.ospf.processes.0.routerId`,
+                        "Router ID (optional)",
+                        routerId
+                    )
+                );
+
+                const passiveDefault = input("checkbox");
+                passiveDefault.checked = process?.passiveInterfaceDefault ?? false;
+
+                settings.append(field("Passive Interface Default (Standard: deaktiviert)", passiveDefault));
+                const passiveInterfaces = document.createElement("div");
+                passiveInterfaces.className = "configuration-network-list";
+
+                const passiveInterfaceHeading = document.createElement("h4");
+                passiveInterfaceHeading.textContent = "Passive Interfaces";
+                passiveInterfaces.append(passiveInterfaceHeading);
+
+                device.interfaces.forEach((iface) => {
+                    const checkbox = input("checkbox");
+
+                    checkbox.checked = process?.passiveInterfaces?.[iface.name] ?? false;
+                    checkbox.setAttribute(
+                        "aria-label",
+                        `${iface.name}: Passive Interface`
+                    );
+
+                    passiveInterfaceControls.set(iface.name, checkbox);
+
+                    passiveInterfaces.append(
+                        field(iface.name, checkbox)
+                    );
+                });
+
+                settings.append(passiveInterfaces);
+                const ospfNetworks = document.createElement("div");
+                ospfNetworks.className = "configuration-network-list";
+
+                const savedNetworks = process?.networks ?? [];
+
+                const networkEntries = savedNetworks.length > 0
+                    ? savedNetworks
+                    : [{ address: "", wildcardMask: "", area: "0" }];
+
+                networkEntries.forEach((network, index) => {
+                    const address = input("text", network.address, 15);
+                    address.placeholder = "z. B. 192.168.10.0";
+
+                    const wildcardMask = input("text", network.wildcardMask, 15);
+                    wildcardMask.placeholder = "z. B. 0.0.0.255";
+
+                    const area = input("text", network.area, 10);
+                    area.placeholder = "0";
+
+                    ospfNetworkControls.push({
+                        address,
+                        wildcardMask,
+                        area
+                    });
+
+                    ospfNetworks.append(
+                        this.validatedField(
+                            `protocols.${protocolIndex}.ospf.processes.0.networks.${index}.address`,
+                            "Netzwerkadresse *",
+                            address
+                        ),
+                        this.validatedField(
+                            `protocols.${protocolIndex}.ospf.processes.0.networks.${index}.wildcardMask`,
+                            "Wildcard-Maske *",
+                            wildcardMask
+                        ),
+                        this.validatedField(
+                            `protocols.${protocolIndex}.ospf.processes.0.networks.${index}.area`,
+                            "Area *",
+                            area
+                        )
+                    );
+                });
+
+                settings.append(ospfNetworks);
+            }
+
+            protocols.append(settings);
+
+            return {
+                type,
+                enabled,
+                settings,
+                ripNetworkControls,
+                ospfNetworkControls,
+                passiveInterfaceControls,
+                processId: type === ProtocolType.Ospf
+                    ? settings.querySelector<HTMLInputElement>('input[type="number"]')
+                    : undefined,
+                routerId: type === ProtocolType.Ospf
+                    ? settings.querySelector<HTMLInputElement>('input[type="text"]')
+                    : undefined,
+                passiveDefault: type === ProtocolType.Ospf
+                    ? settings.querySelector<HTMLInputElement>('input[type="checkbox"]')
+                    : undefined,
+                savedProcesses
+            };
         });
-        if (!protocolControls.length) { protocols.append(document.createTextNode("Keine Protokolle für diesen Gerätetyp.")); }
+
+        if (!protocolControls.length) {
+            protocols.append(document.createTextNode("Keine Protokolle für diesen Gerätetyp."));
+        }
+
         content.append(protocols);
         form.append(content);
+
 
         const actions = document.createElement("footer"); actions.className = "configuration-actions";
         const cancel = button("Abbrechen"); cancel.className = "configuration-secondary";
@@ -316,8 +499,52 @@ export class DeviceConfigurationForm {
                     id, enabled: enabled.checked, ipAddress: ip.value.trim(), subnetMask: mask.value.trim(),
                     description: description.value.trim(), layer: draft.interfaces[index].layer
                 })),
-                protocols: protocolControls.filter((item) => item.selected.checked)
-                    .map(({ type, enabled }) => ({ type, enabled: enabled.checked }))
+                protocols: protocolControls.map(({
+                    type,
+                    enabled,
+                    ripNetworkControls,
+                    ospfNetworkControls,
+                    passiveInterfaceControls,
+                    processId,
+                    routerId,
+                    passiveDefault
+                }) => ({
+                    type,
+                    enabled: enabled.checked,
+
+                    ...(type === ProtocolType.Rip
+                        ? {
+                            rip: {
+                                networks: ripNetworkControls.map((address) => ({
+                                    address: address.value.trim()
+                                }))
+                            }
+                        }
+                        : {}),
+
+                    ...(type === ProtocolType.Ospf
+                        ? {
+                            ospf: {
+                                processes: [{
+                                    processId: Number(processId?.value ?? 1),
+                                    routerId: routerId?.value.trim() || undefined,
+                                    networks: ospfNetworkControls.map((network) => ({
+                                        address: network.address.value.trim(),
+                                        wildcardMask: network.wildcardMask.value.trim(),
+                                        area: network.area.value.trim()
+                                    })),
+                                    passiveInterfaceDefault: passiveDefault?.checked ?? false,
+                                    passiveInterfaces: Object.fromEntries(
+                                        Array.from(passiveInterfaceControls, ([name, checkbox]) => [
+                                            name,
+                                            checkbox.checked
+                                        ])
+                                    )
+                                }]
+                            }
+                        }
+                        : {})
+                }))
             };
             const errors = validateDeviceConfiguration(device, configuration, otherHostnames);
             if (errors.length) { this.showValidationErrors(errors); return; }
@@ -352,6 +579,12 @@ function input(type: string, value = "", maxLength?: number): HTMLInputElement {
     element.autocomplete = type === "password" ? "new-password" : "off";
     if (maxLength !== undefined) { element.maxLength = maxLength; }
     return element;
+
+    function numberInput(value: number): HTMLInputElement {
+        const element = input("number", String(value));
+        element.min = "1";
+        return element;
+    }
 }
 function button(text: string): HTMLButtonElement {
     const result = document.createElement("button"); result.type = "button"; result.textContent = text;
