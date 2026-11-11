@@ -723,3 +723,49 @@ kbd {
     .configuration-open .device-configuration { position: absolute; right: 0; top: 0; width: min(320px, calc(100vw - 40px)); z-index: 20; box-shadow: -8px 0 24px rgb(0 0 0 / 15%); }
     .configuration-open .workspace { position: relative; }
 }
+
+/* Topologie bestätigen – kompaktes Türkis */
+
+.confirm-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+
+    width: auto;
+    min-width: 0;
+    padding: 6px 12px;
+
+    border: 1px solid #13838c;
+    border-radius: 6px;
+
+    background: #13838c;
+    color: #ffffff;
+
+    font-family: inherit;
+    font-size: 11px;
+    font-weight: 600;
+
+    white-space: nowrap;
+    cursor: pointer;
+    touch-action: manipulation;
+
+    box-shadow: 0 2px 5px rgba(19, 131, 140, 0.25);
+    transition: all 0.2s ease;
+}
+
+.confirm-button:hover {
+    background: #1699a2;
+    border-color: #1699a2;
+    box-shadow: 0 3px 8px rgba(19, 131, 140, 0.35);
+}
+
+.confirm-button:active {
+    transform: translateY(1px);
+    box-shadow: none;
+}
+
+.confirm-button:focus-visible {
+    outline: 2px solid var(--vscode-focusBorder);
+    outline-offset: 2px;
+}
+

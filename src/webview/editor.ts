@@ -146,7 +146,24 @@ export class TopologyEditor {
         });
         palette.append(this.cableButton);
         this.nameLabel = htmlElement("span", "topology-name");
-        toolbar.append(palette, htmlElement("div", "toolbar-spacer"), this.nameLabel);
+
+        // Topologie bestätigen
+        const confirmButton = htmlElement(
+            "button",
+            "palette-item confirm-button",
+            "Topologie bestätigen"
+        );
+        confirmButton.type = "button";
+        confirmButton.addEventListener("click", () => {
+            vscodeApi.postMessage({ type: "confirmTopology" });
+        });
+
+        toolbar.append(
+            palette,
+            htmlElement("div", "toolbar-spacer"),
+            this.nameLabel,
+            confirmButton
+        );
 
         // Zeichenfläche
         this.canvas = htmlElement("main", "canvas");
@@ -178,14 +195,14 @@ export class TopologyEditor {
         zoomControls.append(zoomOut, this.zoomLabel, zoomIn, fit);
         this.corner.append(zoomControls);
 
-                
+
         this.canvas.append(
             this.emptyState,
             this.hint,
             this.corner,
             this.interfacePopup
         );
-        
+
         // Interface-Panel
         this.interfacePanel = htmlElement("aside", "interface-panel");
         const panelTitle = htmlElement("h2", "interface-panel-title", "Interfaces");
@@ -350,10 +367,10 @@ export class TopologyEditor {
     }
 
     private notifyModelListeners(): void {
-    for (const listener of this.modelListeners) {
-        listener();
+        for (const listener of this.modelListeners) {
+            listener();
+        }
     }
-}
 
     get persistedState(): TopologyViewState {
         return this.viewState;
@@ -909,7 +926,7 @@ export class TopologyEditor {
         this.renderInterfacePanel();
     }
 
-        
+
     private handleCableDeviceClick(
         deviceId: string,
         clientX: number,
@@ -1193,7 +1210,7 @@ export class TopologyEditor {
             this.connectionList.append(item);
         }
 
-       
+
         // Portübersicht aller Geräte
         this.interfaceOverview.replaceChildren();
 

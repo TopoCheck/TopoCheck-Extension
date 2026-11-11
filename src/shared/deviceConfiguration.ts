@@ -7,16 +7,95 @@ import { ProtocolType } from "../models/protocolType";
 import type { Device } from "../modules/topology/models";
 import { DeviceConfigurationValidationError, validateDeviceConfiguration } from "./validateDeviceConfiguration";
 import type { DeviceAccessConfiguration } from "../models/deviceAccessConfiguration";
+import { RipProtocol, OspfProtocol } from "../models/ciscoProtocols";
 
 export interface DeviceConfiguration extends DeviceAccessConfiguration {
     label?: string;
     hostname: string;
-    interfaces: { id: string; enabled: boolean; ipAddress: string; subnetMask: string;
-        description?: string; layer?: 2 | 3 }[];
-    protocols: { type: ProtocolType; enabled: boolean }[];
+    interfaces: {
+        id: string;
+        enabled: boolean;
+        ipAddress: string;
+        subnetMask: string;
+        description?: string;
+        layer?: 2 | 3;
+    }[];
+    protocols: {
+        type: ProtocolType;
+        enabled: boolean;
+        rip?: {
+            networks: { address: string }[];
+        };
+        ospf?: {
+            processes: {
+                processId: number;
+                routerId?: string;
+                networks: {
+                    address: string;
+                    wildcardMask: string;
+                    area: string;
+                }[];
+                passiveInterfaceDefault: boolean;
+                passiveInterfaces: Record<string, boolean>;
+            }[];
+        };
+    }[];
 }
 
 export { compatibleProtocols };
+
+function isRipConfiguration(value: unknown): boolean {
+    if (!value || typeof value !== "object") { return false; }
+
+    const config = value as Record<string, unknown>;
+
+    return Array.isArray(config.networks) &&
+        config.networks.length <= 1024 &&
+        config.networks.every((network: unknown) => {
+            if (!network || typeof network !== "object") { return false; }
+            const item = network as Record<string, unknown>;
+            return typeof item.address === "string" &&
+                item.address.length <= 32;
+        });
+}
+
+function isOspfConfiguration(value: unknown): boolean {
+    if (!value || typeof value !== "object") { return false; }
+
+    const config = value as Record<string, unknown>;
+
+    return Array.isArray(config.processes) &&
+        config.processes.length <= 32 &&
+        config.processes.every((process: unknown) => {
+            if (!process || typeof process !== "object") { return false; }
+            const item = process as Record<string, unknown>;
+
+            return Number.isInteger(item.processId) &&
+                (item.routerId === undefined ||
+                    (typeof item.routerId === "string" && item.routerId.length <= 32)) &&
+                Array.isArray(item.networks) &&
+                item.networks.length <= 1024 &&
+                item.networks.every((network: unknown) => {
+                    if (!network || typeof network !== "object") { return false; }
+                    const entry = network as Record<string, unknown>;
+
+                    return typeof entry.address === "string" &&
+                        entry.address.length <= 32 &&
+                        typeof entry.wildcardMask === "string" &&
+                        entry.wildcardMask.length <= 32 &&
+                        typeof entry.area === "string" &&
+                        entry.area.length <= 32;
+                }) &&
+                typeof item.passiveInterfaceDefault === "boolean" &&
+                !!item.passiveInterfaces &&
+                typeof item.passiveInterfaces === "object" &&
+                !Array.isArray(item.passiveInterfaces) &&
+                Object.entries(item.passiveInterfaces).every(
+                    ([name, passive]) =>
+                        name.length <= 128 && typeof passive === "boolean"
+                );
+        });
+}
 
 /** Runtime validation at the Webview boundary; semantic checks follow before saving. */
 export function isDeviceConfiguration(value: unknown): value is DeviceConfiguration {
@@ -40,7 +119,15 @@ export function isDeviceConfiguration(value: unknown): value is DeviceConfigurat
             if (!item || typeof item !== "object") { return false; }
             const protocol = item as Record<string, unknown>;
             return Object.values(ProtocolType).includes(protocol.type as ProtocolType) &&
-                typeof protocol.enabled === "boolean";
+                typeof protocol.enabled === "boolean" &&
+                (protocol.rip === undefined || isRipConfiguration(protocol.rip)) &&
+                (protocol.ospf === undefined || isOspfConfiguration(protocol.ospf)) &&
+                (protocol.type === ProtocolType.Rip
+                    ? protocol.ospf === undefined
+                    : protocol.rip === undefined) &&
+                (protocol.type === ProtocolType.Ospf
+                    ? protocol.rip === undefined
+                    : protocol.ospf === undefined);
         });
 }
 
@@ -56,7 +143,38 @@ export function configurationOf(device: Device, connectedInterfaceIds: readonly 
             ipAddress: iface.ipAddress ?? "", subnetMask: iface.subnetMask ?? "",
             description: iface.description ?? "", layer: iface.layer ?? (device.type === "switch" ? 2 : 3)
         })),
-        protocols: (device.protocols ?? []).map(({ type, enabled }) => ({ type, enabled }))
+        protocols: (device.protocols ?? []).map((protocol) => {
+            const result: DeviceConfiguration["protocols"][number] = {
+                type: protocol.type,
+                enabled: protocol.enabled
+            };
+
+            if (protocol.rip !== undefined) {
+                result.rip = {
+                    networks: protocol.rip.networks.map((network) => ({
+                        address: network.address
+                    }))
+                };
+            }
+
+            if (protocol.ospf !== undefined) {
+                result.ospf = {
+                    processes: protocol.ospf.processes.map((process) => ({
+                        processId: process.processId,
+                        routerId: process.routerId,
+                        networks: process.networks.map((network) => ({
+                            address: network.address,
+                            wildcardMask: network.wildcardMask,
+                            area: network.area
+                        })),
+                        passiveInterfaceDefault: process.passiveInterfaceDefault,
+                        passiveInterfaces: { ...process.passiveInterfaces }
+                    }))
+                };
+            }
+
+            return result;
+        })
     };
 }
 
@@ -76,10 +194,12 @@ export function buildConfiguredDevice(device: Device, data: DeviceConfiguration,
     const errors = validateDeviceConfiguration(device, data, otherHostnames);
     if (errors.length) { throw new DeviceConfigurationValidationError(errors); }
     const hostname = data.hostname.trim();
-    const model = new NetworkDevice({ id: device.id, hostname, type: device.type as DeviceType,
+    const model = new NetworkDevice({
+        id: device.id, hostname, type: device.type as DeviceType,
         domainName: data.domainName?.trim() || undefined, username: data.username?.trim() || undefined,
         enableSecret: data.enableSecret || undefined, consolePassword: data.consolePassword || undefined,
-        vtyPassword: data.vtyPassword || undefined, banner: data.banner || undefined });
+        vtyPassword: data.vtyPassword || undefined, banner: data.banner || undefined
+    });
     for (const input of data.interfaces) {
         const original = device.interfaces.find((iface) => iface.id === input.id)!;
         const ip = input.ipAddress.trim();
@@ -92,10 +212,44 @@ export function buildConfiguredDevice(device: Device, data: DeviceConfiguration,
         }));
     }
     for (const protocol of data.protocols) {
-        model.addProtocol(new NetworkProtocol({
-            id: device.protocols?.find((item) => item.type === protocol.type)?.id ?? `${device.id}:${protocol.type}`,
-            ...protocol
-        }));
+        const id = device.protocols?.find(
+            (item) => item.type === protocol.type
+        )?.id ?? `${device.id}:${protocol.type}`;
+
+        if (protocol.type === ProtocolType.Rip) {
+            const rip = new RipProtocol(id);
+            if (protocol.rip !== undefined) {
+                rip.networks.push(...protocol.rip.networks);
+            }
+            if (protocol.enabled) {
+                rip.enable();
+            } else {
+                rip.disable();
+            }
+            model.addProtocol(rip);
+        } else if (protocol.type === ProtocolType.Ospf) {
+            const ospf = new OspfProtocol(id);
+            if (protocol.ospf !== undefined) {
+                ospf.processes.push(
+                    ...protocol.ospf.processes.map((process) => ({
+                        ...process,
+                        networks: process.networks.map((network) => ({ ...network })),
+                        passiveInterfaces: { ...process.passiveInterfaces }
+                    }))
+                );
+            }
+            if (protocol.enabled) {
+                ospf.enable();
+            } else {
+                ospf.disable();
+            }
+            model.addProtocol(ospf);
+        } else {
+            model.addProtocol(new NetworkProtocol({
+                id,
+                ...protocol
+            }));
+        }
     }
     return model;
 }

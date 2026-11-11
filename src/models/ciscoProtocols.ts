@@ -51,6 +51,18 @@ export class OspfProtocol extends NetworkProtocol {
   }
 }
 
+export interface RipNetworkConfiguration {
+    address: string;
+}
+
+export class RipProtocol extends NetworkProtocol {
+    public readonly networks: RipNetworkConfiguration[] = [];
+
+    public constructor(id: string) {
+        super({ id, type: ProtocolType.Rip });
+    }
+}
+
 export interface SwitchportConfiguration {
   mode?: "access" | "trunk";
   accessVlan?: number;

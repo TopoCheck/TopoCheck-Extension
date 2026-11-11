@@ -42,6 +42,34 @@ export interface DeviceConfig {
     updatedAt: string;
 }
 
+export interface TopologyRipConfiguration {
+    networks: {
+        address: string;
+    }[];
+}
+
+export interface TopologyOspfConfiguration {
+    processes: {
+        processId: number;
+        routerId?: string;
+        networks: {
+            address: string;
+            wildcardMask: string;
+            area: string;
+        }[];
+        passiveInterfaceDefault: boolean;
+        passiveInterfaces: Record<string, boolean>;
+    }[];
+}
+
+export interface DeviceProtocol {
+    id: string;
+    type: ProtocolType;
+    enabled: boolean;
+    rip?: TopologyRipConfiguration;
+    ospf?: TopologyOspfConfiguration;
+}
+
 export interface Device extends DeviceAccessConfiguration {
     id: string;
     topologyId: string;
@@ -50,7 +78,7 @@ export interface Device extends DeviceAccessConfiguration {
     type: DeviceType;
     interfaces: Interface[];
     config?: DeviceConfig;
-    protocols?: { id: string; type: ProtocolType; enabled: boolean }[];
+    protocols?: DeviceProtocol[];
 }
 
 export interface Connection {

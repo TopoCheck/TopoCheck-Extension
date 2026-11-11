@@ -17,6 +17,7 @@ import {
     Position,
     Topology,
 } from "./models";
+import { RipProtocol, OspfProtocol } from "../../models/ciscoProtocols";
 
 /** Arten von Änderungen auf die andere module reagieren können. */
 export enum TopologyChangeType {
@@ -109,15 +110,61 @@ export class TopologyStore implements vscode.Disposable {
         return this.readTopology(id, true);
     }
 
-    private async readTopology(id: string, persistRepairs: boolean): Promise<Topology> {
-        let raw: Uint8Array;
+    private async findTopologyFile(id: string): Promise<vscode.Uri> {
+        // Zuerst den alten Speicherort prüfen.
+        const oldFile = this.fileUri(id);
 
         try {
-            raw = await vscode.workspace.fs.readFile(this.fileUri(id));
+            await vscode.workspace.fs.stat(oldFile);
+            return oldFile;
         } catch {
-            throw new Error(
-                `Topology "${id}" konnte nicht geladen werden: Datei nicht gefunden.`
+            // Die Topologie liegt möglicherweise bereits in einem Unterordner.
+        }
+
+        const entries = await vscode.workspace.fs.readDirectory(
+            this.storageUri
+        );
+
+        for (const [name, type] of entries) {
+            if (type !== vscode.FileType.Directory) {
+                continue;
+            }
+
+            const topologyFile = vscode.Uri.joinPath(
+                this.storageUri,
+                name,
+                "topology.json"
             );
+
+            try {
+                const raw = await vscode.workspace.fs.readFile(topologyFile);
+
+                const existing = JSON.parse(
+                    Buffer.from(raw).toString("utf8")
+                ) as Topology;
+
+                if (existing.id === id) {
+                    return topologyFile;
+                }
+            } catch {
+                // Ungültige oder fremde Ordner überspringen.
+            }
+        }
+
+        throw new Error(
+            `Topology "${id}" konnte nicht gefunden werden.`
+        );
+    }
+
+    private async readTopology(id: string, persistRepairs: boolean): Promise<Topology> {
+        let raw: Uint8Array;
+        let topologyFile: vscode.Uri;
+
+        try {
+            topologyFile = await this.findTopologyFile(id);
+            raw = await vscode.workspace.fs.readFile(topologyFile);
+        } catch {
+            throw new Error(`Topology "${id}" konnte nicht geladen werden: Datei nicht gefunden.`);
         }
 
         let parsed: unknown;
@@ -131,8 +178,17 @@ export class TopologyStore implements vscode.Disposable {
 
         const topology = migrateTopology(parsed);
 
-        if (this.ensureDeviceInterfaces(topology) && persistRepairs) {
+        const interfacesRepaired = this.ensureDeviceInterfaces(topology);
+
+        if (interfacesRepaired && persistRepairs) {
             await this.persist(topology);
+        }
+
+        // Alte Topologien automatisch in die neue Ordnerstruktur verschieben.
+        const legacyFile = this.fileUri(id);
+
+        if (topologyFile.fsPath === legacyFile.fsPath) {
+            await this.migrateTopologyToDirectory(topology);
         }
         const connected = new Set(topology.connections.flatMap((connection) =>
             [connection.interfaceAId, connection.interfaceBId]));
@@ -151,42 +207,69 @@ export class TopologyStore implements vscode.Disposable {
             .map((item) => item.hostname));
     }
 
-    async listTopologies(): Promise<Topology[]> {
+    public async listTopologies(): Promise<Topology[]> {
         await this.ensureStorageDir();
 
-        let entries: [string, vscode.FileType][];
-        try {
-            entries = await vscode.workspace.fs.readDirectory(this.storageUri);
-        } catch {
-            return [];
-        }
+        const entries = await vscode.workspace.fs.readDirectory(this.storageUri);
+        const topologyIds = new Set<string>();
 
-        const topologies: Topology[] = [];
-        for (const [fileName, fileType] of entries) {
-            const isTopologyFile =
-                fileType === vscode.FileType.File && fileName.endsWith(".json");
-            if (!isTopologyFile) {
+        for (const [name, type] of entries) {
+            // Alte Topologien direkt im Speicherordner berücksichtigen.
+            if (
+                type === vscode.FileType.File &&
+                name.endsWith(".json") &&
+                !name.endsWith(".json.tmp")
+            ) {
+                topologyIds.add(name.slice(0, -5));
                 continue;
             }
 
-            const id = fileName.slice(0, -".json".length);
+            // Neue Topologien in Unterordnern berücksichtigen.
+            if (type !== vscode.FileType.Directory) {
+                continue;
+            }
+
+            const topologyFile = vscode.Uri.joinPath(
+                this.storageUri,
+                name,
+                "topology.json"
+            );
+
+            try {
+                const raw = await vscode.workspace.fs.readFile(topologyFile);
+                const topology = JSON.parse(
+                    Buffer.from(raw).toString("utf8")
+                ) as Topology;
+
+                if (topology.id) {
+                    topologyIds.add(topology.id);
+                }
+            } catch {
+                // Ordner ohne gültige topology.json überspringen.
+            }
+        }
+
+        const topologies: Topology[] = [];
+
+        for (const id of topologyIds) {
             try {
                 topologies.push(await this.loadTopology(id));
-            } catch {
-                // Einzelne beschädigte Datei überspringen statt die gesamte Liste scheitern zu lassen.
+            } catch (error) {
+                console.warn(
+                    `TopoCheck: Topologie "${id}" konnte nicht geladen werden.`,
+                    error
+                );
             }
         }
 
         return topologies;
     }
 
-    async deleteTopology(id: string): Promise<void> {
-        await this.withWriteLock(id, async () => {
-            await vscode.workspace.fs.delete(this.fileUri(id), { useTrash: false });
-        });
-        this.fireChange({
-            type: TopologyChangeType.TopologyDeleted,
-            topologyId: id,
+    public async deleteTopology(id: string): Promise<void> {
+        const topologyFile = await this.findTopologyFile(id);
+
+        await this.fileWriter.delete(topologyFile, {
+            useTrash: false
         });
     }
 
@@ -203,18 +286,18 @@ export class TopologyStore implements vscode.Disposable {
                 ? this.normalizePosition(input.position)
                 : findFreeGridPosition(Object.values(topology.layout.devices));
 
-            
-const deviceId = randomUUID();
 
-const interfaceNames =
-    input.type === "router"
-        ? ["GigabitEthernet0/0", "GigabitEthernet0/1"]
-        : input.type === "switch"
-          ? Array.from(
-                { length: 8 },
-                (_, index) => `FastEthernet0/${index + 1}`
-            )
-          : ["eth0"];
+            const deviceId = randomUUID();
+
+            const interfaceNames =
+                input.type === "router"
+                    ? ["GigabitEthernet0/0", "GigabitEthernet0/1"]
+                    : input.type === "switch"
+                        ? Array.from(
+                            { length: 8 },
+                            (_, index) => `FastEthernet0/${index + 1}`
+                        )
+                        : ["eth0"];
 
             const newDevice: Device = {
                 id: deviceId,
@@ -374,14 +457,56 @@ const interfaceNames =
                 vtyPassword: model.vtyPassword, banner: model.banner,
                 interfaces: device.interfaces.map((iface) => {
                     const configured = model.findInterface(iface.id)!;
-                    return { ...iface, type: configured.type, enabled: configured.enabled,
+                    return {
+                        ...iface, type: configured.type, enabled: configured.enabled,
                         ipAddress: configured.ipAddress, subnetMask: configured.subnetMask,
-                        description: configured.description, layer: configured.layer };
+                        description: configured.description, layer: configured.layer
+                    };
                 }),
-                protocols: model.protocols.map(({ id, type, enabled }) => ({ id, type, enabled }))
+                protocols: model.protocols.map((protocol) => {
+                    const base = {
+                        id: protocol.id,
+                        type: protocol.type,
+                        enabled: protocol.enabled
+                    };
+
+                    if (protocol instanceof RipProtocol) {
+                        return {
+                            ...base,
+                            rip: {
+                                networks: protocol.networks.map((network) => ({
+                                    address: network.address
+                                }))
+                            }
+                        };
+                    }
+
+                    if (protocol instanceof OspfProtocol) {
+                        return {
+                            ...base,
+                            ospf: {
+                                processes: protocol.processes.map((process) => ({
+                                    processId: process.processId,
+                                    routerId: process.routerId,
+                                    networks: process.networks.map((network) => ({
+                                        address: network.address,
+                                        wildcardMask: network.wildcardMask,
+                                        area: network.area
+                                    })),
+                                    passiveInterfaceDefault: process.passiveInterfaceDefault,
+                                    passiveInterfaces: { ...process.passiveInterfaces }
+                                }))
+                            }
+                        };
+                    }
+
+                    return base;
+                })
             };
-            const candidate: Topology = { ...topology,
-                devices: topology.devices.map((item) => item.id === deviceId ? replacement : item) };
+            const candidate: Topology = {
+                ...topology,
+                devices: topology.devices.map((item) => item.id === deviceId ? replacement : item)
+            };
             await this.persist(candidate);
             this.fireChange({ type: TopologyChangeType.DeviceConfigUpdated, topologyId, deviceId });
         });
@@ -581,11 +706,11 @@ const interfaceNames =
                 device.type === "router"
                     ? ["GigabitEthernet0/0", "GigabitEthernet0/1"]
                     : device.type === "switch"
-                    ? Array.from(
+                        ? Array.from(
                             { length: 8 },
                             (_, index) => `FastEthernet0/${index + 1}`
                         )
-                    : ["eth0"];
+                        : ["eth0"];
 
             device.interfaces = names.map((name) => ({
                 id: randomUUID(),
@@ -661,7 +786,10 @@ const interfaceNames =
     }
 
     private fileUri(id: string): vscode.Uri {
-        return vscode.Uri.joinPath(this.storageUri, `${id}.json`);
+        return vscode.Uri.joinPath(
+            this.storageUri,
+            `${id}.json`
+        );
     }
 
     private tempFileUri(id: string): vscode.Uri {
@@ -674,21 +802,39 @@ const interfaceNames =
 
     private async persist(topology: Topology): Promise<void> {
         await this.ensureStorageDir();
-        const updatedAt = new Date().toISOString();
-        const encoded = Buffer.from(JSON.stringify({ ...topology, updatedAt }, null, 2), "utf8");
-        const tempUri = this.tempFileUri(topology.id);
-        const finalUri = this.fileUri(topology.id);
 
-        // write-then-rename: verhindert, dass ein Absturz mitten im Schreiben eine bereits gespeicherte, gültige Topology-Datei zerstört.
+        const directory = await this.getTopologyDirectory(topology);
+        await this.fileWriter.createDirectory(directory);
+
+        const encoded = Buffer.from(
+            JSON.stringify(topology, null, 2),
+            "utf8"
+        );
+
+        const tempUri = vscode.Uri.joinPath(
+            directory,
+            `${topology.id}.${randomUUID()}.json.tmp`
+        );
+
+        const finalUri = vscode.Uri.joinPath(
+            directory,
+            "topology.json"
+        );
+
         try {
             await this.fileWriter.writeFile(tempUri, encoded);
-            await this.fileWriter.rename(tempUri, finalUri, { overwrite: true });
+            await this.fileWriter.rename(tempUri, finalUri, {
+                overwrite: true
+            });
         } catch (error) {
-            try { await this.fileWriter.delete(tempUri, { useTrash: false }); }
-            catch { /* Cleanup must not hide the original write/rename error. */ }
+            try {
+                await this.fileWriter.delete(tempUri);
+            } catch {
+                // Temporäre Datei existiert möglicherweise nicht mehr.
+            }
+
             throw error;
         }
-        topology.updatedAt = updatedAt;
     }
 
     private fireChange(event: TopologyChangeEvent): void {
@@ -698,5 +844,124 @@ const interfaceNames =
     dispose(): void {
         this.onDidChangeTopologyEmitter.dispose();
         this.onDidChangeLayoutEmitter.dispose();
+    }
+
+    private async getTopologyDirectory(topology: Topology): Promise<vscode.Uri> {
+        await this.ensureStorageDir();
+
+        const entries = await vscode.workspace.fs.readDirectory(this.storageUri);
+
+        // Zuerst prüfen, ob die Topologie bereits einen Ordner besitzt.
+        for (const [name, type] of entries) {
+            if (type !== vscode.FileType.Directory) {
+                continue;
+            }
+
+            const directory = vscode.Uri.joinPath(this.storageUri, name);
+            const topologyFile = vscode.Uri.joinPath(directory, "topology.json");
+
+            try {
+                const raw = await vscode.workspace.fs.readFile(topologyFile);
+                const existing = JSON.parse(
+                    Buffer.from(raw).toString("utf8")
+                ) as Topology;
+
+                if (existing.id === topology.id) {
+                    return directory;
+                }
+            } catch {
+                // Ordner enthält keine lesbare topology.json.
+            }
+        }
+
+        // Einen sicheren Ordnernamen aus dem Topologienamen erstellen.
+        const safeName = topology.name
+            .trim()
+            .replace(/[<>:"/\\|?*]/g, "_")
+            .replace(/[. ]+$/g, "");
+
+        const baseName = safeName || "Topology";
+        let directoryName = baseName;
+
+        // Bei Namenskonflikten die interne ID als Zusatz verwenden.
+        const existingNames = new Set(entries.map(([name]) => name));
+
+        if (existingNames.has(directoryName)) {
+            directoryName = `${baseName}-${topology.id.slice(0, 8)}`;
+        }
+
+        const directory = vscode.Uri.joinPath(
+            this.storageUri,
+            directoryName
+        );
+
+        await this.fileWriter.createDirectory(directory);
+
+        return directory;
+    }
+
+    public async saveGeneratedConfig(
+        topologyId: string,
+        fileName: string,
+        content: string
+    ): Promise<void> {
+        const topology = await this.loadTopology(topologyId);
+
+        const topologyDirectory = await this.getTopologyDirectory(topology);
+
+        const generatedDirectory = vscode.Uri.joinPath(
+            topologyDirectory,
+            "Generated Configs"
+        );
+
+        await this.fileWriter.createDirectory(generatedDirectory);
+
+        const fileUri = vscode.Uri.joinPath(
+            generatedDirectory,
+            fileName
+        );
+
+        console.log(`TopoCheck: Speicherpfad: ${fileUri.fsPath}`);
+
+        await this.fileWriter.writeFile(
+            fileUri,
+            Buffer.from(content, "utf8")
+        );
+    }
+
+    private async migrateTopologyToDirectory(
+        topology: Topology
+    ): Promise<void> {
+        const oldFile = this.fileUri(topology.id);
+
+        let oldFileExists = false;
+
+        try {
+            await vscode.workspace.fs.stat(oldFile);
+            oldFileExists = true;
+        } catch {
+            return;
+        }
+
+        const directory = await this.getTopologyDirectory(topology);
+
+        const newFile = vscode.Uri.joinPath(
+            directory,
+            "topology.json"
+        );
+
+        await this.fileWriter.writeFile(
+            newFile,
+            Buffer.from(
+                JSON.stringify(topology, null, 2),
+                "utf8"
+            )
+        );
+
+        if (oldFileExists) {
+            await this.fileWriter.delete(oldFile, {
+                useTrash: false
+            });
+        }
     }
 }

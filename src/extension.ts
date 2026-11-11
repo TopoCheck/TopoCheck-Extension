@@ -20,6 +20,9 @@ export function activate(context: vscode.ExtensionContext): void {
 
   registry.initializeAll();
 
+  const configModule = new ConfigModule(topologyModule.store);
+  topologyModule.setConfigModule(configModule);
+
   context.subscriptions.push(topologyModule);
 
   const diagnostics =
@@ -83,4 +86,4 @@ export function activate(context: vscode.ExtensionContext): void {
   );
 }
 
-export function deactivate(): void { }
+export function deactivate(): void {}
