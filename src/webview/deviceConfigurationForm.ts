@@ -378,34 +378,6 @@ export class DeviceConfigurationForm {
                     )
                 );
 
-                const passiveDefault = input("checkbox");
-                passiveDefault.checked = process?.passiveInterfaceDefault ?? false;
-
-                settings.append(field("Passive Interface Default (Standard: deaktiviert)", passiveDefault));
-                const passiveInterfaces = document.createElement("div");
-                passiveInterfaces.className = "configuration-network-list";
-
-                const passiveInterfaceHeading = document.createElement("h4");
-                passiveInterfaceHeading.textContent = "Passive Interfaces";
-                passiveInterfaces.append(passiveInterfaceHeading);
-
-                device.interfaces.forEach((iface) => {
-                    const checkbox = input("checkbox");
-
-                    checkbox.checked = process?.passiveInterfaces?.[iface.name] ?? false;
-                    checkbox.setAttribute(
-                        "aria-label",
-                        `${iface.name}: Passive Interface`
-                    );
-
-                    passiveInterfaceControls.set(iface.name, checkbox);
-
-                    passiveInterfaces.append(
-                        field(iface.name, checkbox)
-                    );
-                });
-
-                settings.append(passiveInterfaces);
                 const ospfNetworks = document.createElement("div");
                 ospfNetworks.className = "configuration-network-list";
 
