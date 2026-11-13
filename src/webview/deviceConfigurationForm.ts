@@ -311,6 +311,9 @@ export class DeviceConfigurationForm {
 
             const ripNetworkControls: HTMLInputElement[] = [];
 
+            let ripVersion: HTMLSelectElement | undefined;
+            let ripNoAutoSummary: HTMLInputElement | undefined;
+
             const ospfNetworkControls: {
                 address: HTMLInputElement;
                 wildcardMask: HTMLInputElement;
@@ -319,53 +322,141 @@ export class DeviceConfigurationForm {
 
             const passiveInterfaceControls = new Map<string, HTMLInputElement>();
 
+
             if (type === ProtocolType.Rip) {
-                const heading = document.createElement("h4");
-                heading.textContent = "RIP-Einstellungen";
-                settings.append(heading);
+                const ripSettings = document.createElement("details");
+                ripSettings.className = "configuration-advanced";
+
+                const ripSummary = document.createElement("summary");
+                ripSummary.textContent = "RIP-Einstellungen";
+                ripSettings.append(ripSummary);
+
+                ripVersion = document.createElement("select");
+
+                const version1 = document.createElement("option");
+                version1.value = "1";
+                version1.textContent = "Version 1";
+
+                const version2 = document.createElement("option");
+                version2.value = "2";
+                version2.textContent = "Version 2";
+
+                ripVersion.append(version1, version2);
+                ripVersion.value = String(saved?.rip?.version ?? 2);
+
+                ripNoAutoSummary = input("checkbox");
+                ripNoAutoSummary.checked = saved?.rip?.noAutoSummary ?? true;
+
+                ripSettings.append(
+                    field("RIP-Version", ripVersion),
+                    field("No Auto Summary", ripNoAutoSummary)
+                );
 
                 const networks = document.createElement("div");
                 networks.className = "configuration-network-list";
 
+                const networkRows = document.createElement("div");
+
                 const savedNetworks = saved?.rip?.networks ?? [];
 
                 const networkEntries = savedNetworks.length > 0
-                    ? savedNetworks
+                    ? savedNetworks.map((network) => ({ address: network.address }))
                     : [{ address: "" }];
 
-                networkEntries.forEach((network, index) => {
-                    const address = input("text", network.address, 15);
-                    address.placeholder = "z. B. 192.168.10.0";
+                const saveRipNetworkValues = () => {
+                    ripNetworkControls.forEach((control, index) => {
+                        if (networkEntries[index]) {
+                            networkEntries[index].address = control.value;
+                        }
+                    });
+                };
 
-                    ripNetworkControls.push(address);
+                const renderNetworks = () => {
+                    ripNetworkControls.length = 0;
+                    networkRows.replaceChildren();
 
-                    networks.append(
-                        this.validatedField(
-                            `protocols.${protocolIndex}.rip.networks.${index}.address`,
-                            "Netzwerkadresse *",
-                            address
-                        )
-                    );
+                    networkEntries.forEach((network, index) => {
+                        const address = input("text", network.address, 15);
+                        address.placeholder = "z. B. 192.168.10.0";
+
+                        ripNetworkControls.push(address);
+
+                        const networkGroup = document.createElement("div");
+                        networkGroup.className = "configuration-network-list";
+
+                        const heading = document.createElement("h4");
+                        heading.textContent = `Netzwerk ${index + 1}`;
+
+                        networkGroup.append(
+                            heading,
+                            this.validatedField(
+                                `protocols.${protocolIndex}.rip.networks.${index}.address`,
+                                "Netzwerkadresse *",
+                                address
+                            )
+                        );
+
+                        if (index > 0) {
+                            const removeButton = button("Netzwerk entfernen");
+
+                            removeButton.addEventListener("click", () => {
+                                saveRipNetworkValues();
+                                networkEntries.splice(index, 1);
+                                renderNetworks();
+                            });
+
+                            networkGroup.append(removeButton);
+                        }
+
+                        networkRows.append(networkGroup);
+                    });
+                };
+
+                const addNetworkButton = button("Netzwerk hinzufügen");
+
+                addNetworkButton.addEventListener("click", () => {
+                    saveRipNetworkValues();
+                    networkEntries.push({ address: "" });
+                    renderNetworks();
                 });
 
-                settings.append(networks);
+                networks.append(networkRows, addNetworkButton);
+                renderNetworks();
+
+                ripSettings.append(networks);
+                settings.append(ripSettings);
             }
 
+
             if (type === ProtocolType.Ospf) {
-                const heading = document.createElement("h4");
-                heading.textContent = "OSPF-Einstellungen";
-                settings.append(heading);
+                const ospfSettings = document.createElement("details");
+                ospfSettings.className = "configuration-advanced";
+
+                const ospfSummary = document.createElement("summary");
+                ospfSummary.textContent = "OSPF-Einstellungen";
+                ospfSettings.append(ospfSummary);
 
                 const process = saved?.ospf?.processes?.[0];
 
                 const processId = input("number", String(process?.processId ?? 1));
                 processId.min = "1";
                 processId.max = "65535";
+                processId.step = "1";
+                processId.addEventListener("input", () => {
+                    const value = Number(processId.value);
+                    if (processId.value !== "" && (!Number.isInteger(value) || value < 1 || value > 65535)) {
+                        processId.setCustomValidity("Process ID muss eine ganze Zahl zwischen 1 und 65535 sein.");
+                    } else {
+                        processId.setCustomValidity("");
+                    }
+                });
+                processId.min = "1";
+                processId.max = "65535";
 
                 const routerId = input("text", process?.routerId ?? "", 15);
                 routerId.placeholder = "Automatische Auswahl";
 
-                settings.append(
+                ospfSettings.append(
                     this.validatedField(
                         `protocols.${protocolIndex}.ospf.processes.0.processId`,
                         "Process ID (Standard: 1)",
@@ -384,45 +475,152 @@ export class DeviceConfigurationForm {
                 const savedNetworks = process?.networks ?? [];
 
                 const networkEntries = savedNetworks.length > 0
-                    ? savedNetworks
+                    ? savedNetworks.map((network) => ({
+                        address: network.address,
+                        wildcardMask: network.wildcardMask,
+                        area: network.area
+                    }))
                     : [{ address: "", wildcardMask: "", area: "0" }];
 
-                networkEntries.forEach((network, index) => {
-                    const address = input("text", network.address, 15);
-                    address.placeholder = "z. B. 192.168.10.0";
+                const networkRows = document.createElement("div");
 
-                    const wildcardMask = input("text", network.wildcardMask, 15);
-                    wildcardMask.placeholder = "z. B. 0.0.0.255";
+                const saveOspfNetworkValues = () => {
+                    ospfNetworkControls.forEach((control, index) => {
+                        networkEntries[index].address = control.address.value;
+                        networkEntries[index].wildcardMask = control.wildcardMask.value;
+                        networkEntries[index].area = control.area.value;
+                    });
+                };
 
-                    const area = input("text", network.area, 10);
-                    area.placeholder = "0";
+                const renderOspfNetworks = () => {
+                    ospfNetworkControls.length = 0;
+                    networkRows.replaceChildren();
 
-                    ospfNetworkControls.push({
-                        address,
-                        wildcardMask,
-                        area
+                    networkEntries.forEach((network, index) => {
+                        const address = input("text", network.address, 15);
+                        address.placeholder = "z. B. 192.168.10.0";
+
+                        const wildcardMask = input("text", network.wildcardMask, 15);
+                        wildcardMask.placeholder = "z. B. 0.0.0.255";
+
+                        const area = input("text", network.area, 10);
+                        area.placeholder = "0";
+
+                        ospfNetworkControls.push({ address, wildcardMask, area });
+
+                        const networkGroup = document.createElement("div");
+                        networkGroup.className = "configuration-network-list";
+
+                        const heading = document.createElement("h4");
+                        heading.textContent = `Netzwerk ${index + 1}`;
+
+                        const removeButton = button("Netzwerk entfernen");
+                        removeButton.disabled = networkEntries.length <= 1;
+
+                        removeButton.addEventListener("click", () => {
+                            saveOspfNetworkValues();
+                            networkEntries.splice(index, 1);
+                            renderOspfNetworks();
+                        });
+
+                        networkGroup.append(
+                            heading,
+                            this.validatedField(
+                                `protocols.${protocolIndex}.ospf.processes.0.networks.${index}.address`,
+                                "Netzwerkadresse *",
+                                address
+                            ),
+                            this.validatedField(
+                                `protocols.${protocolIndex}.ospf.processes.0.networks.${index}.wildcardMask`,
+                                "Wildcard-Maske *",
+                                wildcardMask
+                            ),
+                            this.validatedField(
+                                `protocols.${protocolIndex}.ospf.processes.0.networks.${index}.area`,
+                                "Area *",
+                                area
+                            ),
+                            removeButton
+                        );
+
+                        networkRows.append(networkGroup);
+                    });
+                };
+
+                const addNetworkButton = button("Netzwerk hinzufügen");
+
+                addNetworkButton.addEventListener("click", () => {
+                    saveOspfNetworkValues();
+
+                    networkEntries.push({
+                        address: "",
+                        wildcardMask: "",
+                        area: "0"
                     });
 
-                    ospfNetworks.append(
-                        this.validatedField(
-                            `protocols.${protocolIndex}.ospf.processes.0.networks.${index}.address`,
-                            "Netzwerkadresse *",
-                            address
-                        ),
-                        this.validatedField(
-                            `protocols.${protocolIndex}.ospf.processes.0.networks.${index}.wildcardMask`,
-                            "Wildcard-Maske *",
-                            wildcardMask
-                        ),
-                        this.validatedField(
-                            `protocols.${protocolIndex}.ospf.processes.0.networks.${index}.area`,
-                            "Area *",
-                            area
-                        )
-                    );
+                    renderOspfNetworks();
                 });
 
-                settings.append(ospfNetworks);
+                ospfNetworks.append(networkRows, addNetworkButton);
+                renderOspfNetworks();
+
+                ospfSettings.append(ospfNetworks);
+
+                const passiveDefault = input("checkbox");
+                passiveDefault.checked = process?.passiveInterfaceDefault ?? false;
+
+                ospfSettings.append(
+                    field("Passive Interface Default (Standard: deaktiviert)", passiveDefault)
+                );
+
+                const passiveInterfaces = document.createElement("div");
+                passiveInterfaces.className = "configuration-network-list";
+
+                const passiveInterfaceHeading = document.createElement("h4");
+                passiveInterfaceHeading.textContent = "Passive Interfaces";
+                passiveInterfaces.append(passiveInterfaceHeading);
+
+                const passiveInterfaceValues = new Map<string, boolean>(
+                    Object.entries(process?.passiveInterfaces ?? {})
+                );
+
+                const renderPassiveInterfaces = () => {
+                    passiveInterfaceControls.forEach((checkbox, name) => {
+                        passiveInterfaceValues.set(name, checkbox.checked);
+                    });
+
+                    passiveInterfaceControls.clear();
+                    passiveInterfaces.replaceChildren(passiveInterfaceHeading);
+
+                    controls
+                        .filter(({ enabled }) => enabled.checked)
+                        .forEach(({ id }) => {
+                            const iface = device.interfaces.find((item) => item.id === id);
+                            if (!iface) {
+                                return;
+                            }
+
+                            const checkbox = input("checkbox");
+                            checkbox.checked = passiveInterfaceValues.get(iface.name) ?? false;
+
+                            checkbox.setAttribute(
+                                "aria-label",
+                                `${iface.name}: Passive Interface`
+                            );
+
+                            passiveInterfaceControls.set(iface.name, checkbox);
+                            passiveInterfaces.append(field(iface.name, checkbox));
+                        });
+                };
+
+                controls.forEach(({ enabled }) => {
+                    enabled.addEventListener("change", renderPassiveInterfaces);
+                });
+
+                renderPassiveInterfaces();
+
+                ospfSettings.append(passiveInterfaces);
+                settings.append(ospfSettings);
             }
 
             protocols.append(settings);
@@ -431,6 +629,8 @@ export class DeviceConfigurationForm {
                 type,
                 enabled,
                 settings,
+                ripVersion,
+                ripNoAutoSummary,
                 ripNetworkControls,
                 ospfNetworkControls,
                 passiveInterfaceControls,
@@ -475,6 +675,8 @@ export class DeviceConfigurationForm {
                     type,
                     enabled,
                     ripNetworkControls,
+                    ripVersion,
+                    ripNoAutoSummary,
                     ospfNetworkControls,
                     passiveInterfaceControls,
                     processId,
@@ -487,6 +689,8 @@ export class DeviceConfigurationForm {
                     ...(type === ProtocolType.Rip
                         ? {
                             rip: {
+                                version: Number(ripVersion?.value ?? 2) as 1 | 2,
+                                noAutoSummary: ripNoAutoSummary?.checked ?? true,
                                 networks: ripNetworkControls.map((address) => ({
                                     address: address.value.trim()
                                 }))

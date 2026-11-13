@@ -474,6 +474,8 @@ export class TopologyStore implements vscode.Disposable {
                         return {
                             ...base,
                             rip: {
+                                version: protocol.version,
+                                noAutoSummary: protocol.noAutoSummary,
                                 networks: protocol.networks.map((network) => ({
                                     address: network.address
                                 }))

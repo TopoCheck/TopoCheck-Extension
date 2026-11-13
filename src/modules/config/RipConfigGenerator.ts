@@ -43,8 +43,8 @@ export class RipConfigGenerator {
 
         const lines = [
             "router rip",
-            " version 2",
-            " no auto-summary",
+            ` version ${ripProtocol.version ?? 2}`,
+            ...(ripProtocol.noAutoSummary ? [" no auto-summary"] : []),
             ...Array.from(networks)
                 .sort()
                 .map((network) => ` network ${network}`)

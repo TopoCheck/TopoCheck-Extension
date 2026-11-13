@@ -164,15 +164,28 @@ export function validateDeviceConfiguration(device: Device | undefined, data: De
             processes.forEach((process, processIndex) => {
                 const processField = `${field}.ospf.processes.${processIndex}`;
 
+                if (process.routerId !== undefined && process.routerId.trim() !== "") {
+                    const validRouterId =
+                        /^(0|[1-9]|[1-9]\d|1\d\d|2[0-4]\d|25[0-5])\.(0|[1-9]|[1-9]\d|1\d\d|2[0-4]\d|25[0-5])\.(0|[1-9]|[1-9]\d|1\d\d|2[0-4]\d|25[0-5])\.(0|[1-9]|[1-9]\d|1\d\d|2[0-4]\d|25[0-5])$/.test(process.routerId.trim());
+
+                    if (!validRouterId) {
+                        add(
+                            `${processField}.routerId`,
+                            "ospf-router-id-invalid",
+                            "Bitte eine gültige OSPF Router-ID ohne führende Nullen angeben."
+                        );
+                    }
+                }
+
                 if (
-                    process.routerId !== undefined &&
-                    process.routerId.trim() !== "" &&
-                    !isValidIpv4Address(process.routerId)
+                    !Number.isInteger(process.processId) ||
+                    process.processId < 1 ||
+                    process.processId > 65535
                 ) {
                     add(
-                        `${processField}.routerId`,
-                        "ospf-router-id-invalid",
-                        "Bitte eine gültige OSPF Router-ID angeben."
+                        `${processField}.processId`,
+                        "ospf-process-id-invalid",
+                        "Die OSPF Process ID muss eine ganze Zahl zwischen 1 und 65535 sein."
                     );
                 }
 

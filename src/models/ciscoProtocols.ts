@@ -52,11 +52,13 @@ export class OspfProtocol extends NetworkProtocol {
 }
 
 export interface RipNetworkConfiguration {
-    address: string;
+  address: string;
 }
 
 export class RipProtocol extends NetworkProtocol {
     public readonly networks: RipNetworkConfiguration[] = [];
+    public version: 1 | 2 = 2;
+    public noAutoSummary = true;
 
     public constructor(id: string) {
         super({ id, type: ProtocolType.Rip });

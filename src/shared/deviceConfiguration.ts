@@ -24,6 +24,8 @@ export interface DeviceConfiguration extends DeviceAccessConfiguration {
         type: ProtocolType;
         enabled: boolean;
         rip?: {
+            version: 1 | 2;
+            noAutoSummary: boolean;
             networks: { address: string }[];
         };
         ospf?: {
@@ -49,7 +51,12 @@ function isRipConfiguration(value: unknown): boolean {
 
     const config = value as Record<string, unknown>;
 
-    return Array.isArray(config.networks) &&
+    return (config.version === undefined ||
+        config.version === 1 ||
+        config.version === 2) &&
+        (config.noAutoSummary === undefined ||
+            typeof config.noAutoSummary === "boolean") &&
+        Array.isArray(config.networks) &&
         config.networks.length <= 1024 &&
         config.networks.every((network: unknown) => {
             if (!network || typeof network !== "object") { return false; }
@@ -151,6 +158,8 @@ export function configurationOf(device: Device, connectedInterfaceIds: readonly 
 
             if (protocol.rip !== undefined) {
                 result.rip = {
+                    version: protocol.rip.version ?? 2,
+                    noAutoSummary: protocol.rip.noAutoSummary ?? true,
                     networks: protocol.rip.networks.map((network) => ({
                         address: network.address
                     }))
@@ -219,6 +228,8 @@ export function buildConfiguredDevice(device: Device, data: DeviceConfiguration,
         if (protocol.type === ProtocolType.Rip) {
             const rip = new RipProtocol(id);
             if (protocol.rip !== undefined) {
+                rip.version = protocol.rip.version ?? 2;
+                rip.noAutoSummary = protocol.rip.noAutoSummary ?? true;
                 rip.networks.push(...protocol.rip.networks);
             }
             if (protocol.enabled) {

@@ -43,6 +43,8 @@ export interface DeviceConfig {
 }
 
 export interface TopologyRipConfiguration {
+    version?: 1 | 2;
+    noAutoSummary?: boolean;
     networks: {
         address: string;
     }[];
