@@ -1,4 +1,5 @@
 import { DeviceType } from "../models/deviceType";
+import type { NatInterfaceRoles } from "../models/ciscoProtocols";
 import { InterfaceType } from "../models/interfaceType";
 import { isValidIpv4Address, isValidSubnetMask } from "../models/ipv4";
 import { compatibleProtocols } from "../models/networkDevice";
@@ -345,8 +346,55 @@ function validateProtocols(
             }
         } else if (protocol.type === ProtocolType.Nat && protocol.nat !== undefined) {
             validateStaticNat(device, data, protocol.nat, `${field}.nat`, report);
+        } else if (protocol.type === ProtocolType.Pat && protocol.pat !== undefined) {
+            validatePat(device, data, protocol.pat, `${field}.pat`, report);
         }
     });
+}
+
+function validateNatRoles(
+    device: Device,
+    data: DeviceConfiguration,
+    roles: NatInterfaceRoles,
+    field: string,
+    report: Report,
+    protocolName: "NAT" | "PAT"
+): void {
+    for (const [key, label] of [
+        ["insideInterfaceId", "Inside"],
+        ["outsideInterfaceId", "Outside"]
+    ] as const) {
+        if (!isLayer3Interface(device, data, roles[key])) {
+            report(`${field}.${key}`, "nat-interface-invalid", `Wähle ein gültiges Layer-3-Interface für ${protocolName} ${label}.`);
+        }
+    }
+    if (roles.insideInterfaceId && roles.insideInterfaceId === roles.outsideInterfaceId) {
+        report(`${field}.outsideInterfaceId`, "nat-interface-duplicate", "Inside und Outside benötigen unterschiedliche Interfaces.");
+    }
+}
+
+function validatePat(
+    device: Device,
+    data: DeviceConfiguration,
+    pat: NonNullable<ProtocolConfiguration["pat"]>,
+    field: string,
+    report: Report
+): void {
+    validateNatRoles(device, data, pat, field, report, "PAT");
+
+    const acl = data.protocols.find((protocol) => protocol.type === ProtocolType.Acl && protocol.enabled);
+    const acls = acl?.acls ?? (acl?.acl ? [acl.acl] : []);
+    if (!pat.aclName || !acls.some(({ name }) => name === pat.aclName)) {
+        report(`${field}.aclName`, "pat-acl-invalid", "Wähle eine vorhandene ACL bei aktiviertem ACL-Protokoll.");
+    }
+
+    const nat = data.protocols.find((protocol) => protocol.type === ProtocolType.Nat && protocol.enabled)?.nat;
+    if (pat.insideInterfaceId && pat.insideInterfaceId === nat?.outsideInterfaceId) {
+        report(`${field}.insideInterfaceId`, "nat-role-conflict", "Dieses Interface ist im statischen NAT bereits als Outside zugewiesen.");
+    }
+    if (pat.outsideInterfaceId && pat.outsideInterfaceId === nat?.insideInterfaceId) {
+        report(`${field}.outsideInterfaceId`, "nat-role-conflict", "Dieses Interface ist im statischen NAT bereits als Inside zugewiesen.");
+    }
 }
 
 function validateStaticNat(
@@ -356,17 +404,7 @@ function validateStaticNat(
     field: string,
     report: Report
 ): void {
-    for (const [key, label] of [
-        ["insideInterfaceId", "Inside"],
-        ["outsideInterfaceId", "Outside"]
-    ] as const) {
-        if (!isLayer3Interface(device, data, nat[key])) {
-            report(`${field}.${key}`, "nat-interface-invalid", `Wähle ein gültiges Layer-3-Interface für NAT ${label}.`);
-        }
-    }
-    if (nat.insideInterfaceId && nat.insideInterfaceId === nat.outsideInterfaceId) {
-        report(`${field}.outsideInterfaceId`, "nat-interface-duplicate", "Inside und Outside benötigen unterschiedliche Interfaces.");
-    }
+    validateNatRoles(device, data, nat, field, report, "NAT");
     if (!nat.mappings.length) {
         report(`${field}.mappings`, "nat-mapping-required", "Füge mindestens eine statische NAT-Zuordnung hinzu.");
     }

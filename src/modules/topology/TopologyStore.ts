@@ -17,7 +17,7 @@ import {
     Position,
     Topology,
 } from "./models";
-import { AclProtocol, NatProtocol, RipProtocol, OspfProtocol } from "../../models/ciscoProtocols";
+import { AclProtocol, NatProtocol, PatProtocol, RipProtocol, OspfProtocol } from "../../models/ciscoProtocols";
 
 /** Arten von Änderungen auf die andere module reagieren können. */
 export enum TopologyChangeType {
@@ -475,6 +475,9 @@ export class TopologyStore implements vscode.Disposable {
                     }
                     if (protocol instanceof NatProtocol) {
                         return { ...base, nat: protocol.configuration };
+                    }
+                    if (protocol instanceof PatProtocol) {
+                        return { ...base, pat: protocol.configuration };
                     }
 
                     if (protocol instanceof RipProtocol) {

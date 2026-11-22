@@ -93,10 +93,17 @@ export interface StaticNatMapping {
   globalAddress: string;
 }
 
-export interface StaticNatConfiguration {
+export interface NatInterfaceRoles {
   insideInterfaceId: string;
   outsideInterfaceId: string;
+}
+
+export interface StaticNatConfiguration extends NatInterfaceRoles {
   mappings: StaticNatMapping[];
+}
+
+export interface PatConfiguration extends NatInterfaceRoles {
+  aclName: string;
 }
 
 export const MAX_STATIC_NAT_MAPPINGS = 1024;
@@ -104,6 +111,12 @@ export const MAX_STATIC_NAT_MAPPINGS = 1024;
 export class NatProtocol extends NetworkProtocol {
   public constructor(id: string, enabled: boolean, public readonly configuration: StaticNatConfiguration) {
     super({ id, enabled, type: ProtocolType.Nat });
+  }
+}
+
+export class PatProtocol extends NetworkProtocol {
+  public constructor(id: string, enabled: boolean, public readonly configuration: PatConfiguration) {
+    super({ id, enabled, type: ProtocolType.Pat });
   }
 }
 

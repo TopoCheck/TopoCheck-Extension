@@ -3,7 +3,7 @@ import { randomUUID } from "crypto";
 import * as os from "os";
 import * as path from "path";
 import * as vscode from "vscode";
-import type { StaticNatConfiguration } from "../../models/ciscoProtocols";
+import type { PatConfiguration, StaticNatConfiguration } from "../../models/ciscoProtocols";
 import { ProtocolType } from "../../models/protocolType";
 import { ConfigModule } from "../../modules/config/ConfigModule";
 import type { Device } from "../../modules/topology/models";
@@ -11,7 +11,7 @@ import { TopologyStore } from "../../modules/topology/TopologyStore";
 import { configurationOf } from "../../shared/deviceConfiguration";
 import { DeviceConfigurationValidationError } from "../../shared/validateDeviceConfiguration";
 
-suite("Static NAT configuration generation", () => {
+suite("NAT and PAT configuration generation", () => {
     let storage: vscode.Uri;
     let store: TopologyStore;
     let topologyId: string;
@@ -99,5 +99,75 @@ suite("Static NAT configuration generation", () => {
                 error.errors.some(({ code }) => code === "nat-interface-duplicate") &&
                 error.errors.some(({ code }) => code === "nat-address-invalid") &&
                 error.errors.some(({ code }) => code === "nat-address-duplicate"));
+    });
+
+    function patDraft() {
+        const pat: PatConfiguration = {
+            insideInterfaceId: nat.insideInterfaceId,
+            outsideInterfaceId: nat.outsideInterfaceId,
+            aclName: "PAT_SOURCES"
+        };
+        const draft = configurationOf(router);
+        draft.protocols = [
+            { type: ProtocolType.Pat, enabled: true, pat },
+            {
+                type: ProtocolType.Acl, enabled: true, acls: [{
+                    name: pat.aclName,
+                    rules: [{ action: "permit", source: "192.168.1.0", sourceWildcard: "0.0.0.255", destination: "any", destinationWildcard: "" }]
+                }]
+            }
+        ];
+        return { draft, pat };
+    }
+
+    test("persists PAT and generates overload without static NAT or routing", async () => {
+        const { draft } = patDraft();
+        await store.configureDevice(topologyId, router.id, draft);
+        const [savedRouter] = (await store.loadTopology(topologyId)).devices;
+        assert.deepStrictEqual(configurationOf(savedRouter).protocols, draft.protocols);
+
+        assert.strictEqual(await new ConfigModule(store).generateForTopology(topologyId), 1);
+        assert.strictEqual(await readConfig(), [
+            `hostname ${router.hostname}`,
+            "ip access-list extended PAT_SOURCES", " permit ip 192.168.1.0 0.0.0.255 any", " exit",
+            `ip nat inside source list PAT_SOURCES interface ${router.interfaces[1].name} overload`,
+            `interface ${router.interfaces[0].name}`, " ip nat inside", " exit",
+            `interface ${router.interfaces[1].name}`, " ip nat outside", " exit", "end"
+        ].join("\n"));
+    });
+
+    test("generates OSPF, static NAT and PAT together without repeating interface roles", async () => {
+        const { draft, pat } = patDraft();
+        draft.protocols.push(
+            { type: ProtocolType.Nat, enabled: true, nat },
+            { type: ProtocolType.Ospf, enabled: true, ospf: { processes: [{
+                processId: 1,
+                networks: [{ address: "192.168.1.0", wildcardMask: "0.0.0.255", area: "0" }],
+                passiveInterfaceDefault: false, passiveInterfaces: {}
+            }] } }
+        );
+        await store.configureDevice(topologyId, router.id, draft);
+        const generator = new ConfigModule(store);
+        assert.strictEqual(await generator.generateForTopology(topologyId), 1);
+        const config = await readConfig();
+        assert.ok(config.includes("router ospf 1\n network 192.168.1.0 0.0.0.255 area 0\n exit"));
+        assert.ok(config.includes("ip nat inside source static 192.168.1.5 203.0.113.5"));
+        const overload = `ip nat inside source list ${pat.aclName} interface ${router.interfaces[1].name} overload`;
+        assert.ok(config.includes(overload));
+        assert.strictEqual(config.split("\n").filter((line) => line === " ip nat inside").length, 1);
+        assert.strictEqual(config.split("\n").filter((line) => line === " ip nat outside").length, 1);
+    });
+
+    test("rejects unavailable ACLs and interfaces assigned opposite static NAT roles", async () => {
+        const { draft, pat } = patDraft();
+        draft.protocols[1].enabled = false;
+        draft.protocols.push({ type: ProtocolType.Nat, enabled: true, nat });
+        pat.insideInterfaceId = nat.outsideInterfaceId;
+        pat.outsideInterfaceId = nat.insideInterfaceId;
+
+        await assert.rejects(store.configureDevice(topologyId, router.id, draft),
+            (error: unknown) => error instanceof DeviceConfigurationValidationError &&
+                error.errors.some(({ code }) => code === "pat-acl-invalid") &&
+                error.errors.filter(({ code }) => code === "nat-role-conflict").length === 2);
     });
 });

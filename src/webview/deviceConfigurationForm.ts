@@ -1,6 +1,6 @@
 import type { Device } from "../modules/topology/models";
 import { Ipv4AclConfiguration, Ipv4AclRule, MAX_IPV4_ACLS, MAX_IPV4_ACL_RULES } from "../models/ciscoProtocols";
-import { MAX_STATIC_NAT_MAPPINGS, StaticNatConfiguration, StaticNatMapping } from "../models/ciscoProtocols";
+import { MAX_STATIC_NAT_MAPPINGS, PatConfiguration, StaticNatConfiguration, StaticNatMapping } from "../models/ciscoProtocols";
 import { DeviceType } from "../models/deviceType";
 import { ProtocolType } from "../models/protocolType";
 import { compatibleProtocols, configurationOf, DeviceConfiguration } from "../shared/deviceConfiguration";
@@ -395,6 +395,54 @@ export class DeviceConfigurationForm {
             insideInterfaceId: inside.value,
             outsideInterfaceId: outside.value,
             mappings: Array.from(mappings.values(), (read) => read())
+        });
+    }
+
+    private appendPatSettings(
+        settings: HTMLElement,
+        enabled: HTMLInputElement,
+        device: Device,
+        saved: PatConfiguration | undefined,
+        protocolIndex: number,
+        readAcls: () => Ipv4AclConfiguration[],
+        readNat: () => StaticNatConfiguration | undefined
+    ): () => PatConfiguration {
+        const prefix = `protocols.${protocolIndex}.pat`;
+        const inside = layer3InterfaceSelect(device, "Inside-Interface auswählen", saved?.insideInterfaceId);
+        const outside = layer3InterfaceSelect(device, "Outside-Interface auswählen", saved?.outsideInterfaceId);
+        const acl = document.createElement("select");
+        const refreshAclOptions = (selected: string) => {
+            const names = new Set(readAcls().map(({ name }) => name).filter(Boolean));
+            acl.replaceChildren(new Option("ACL auswählen", ""));
+            for (const name of names) {
+                acl.append(new Option(name, name));
+            }
+            if (selected && !names.has(selected)) {
+                const unavailable = new Option(`${selected} (nicht verfügbar)`, selected);
+                unavailable.disabled = true;
+                acl.append(unavailable);
+            }
+            acl.value = selected;
+        };
+        refreshAclOptions(saved?.aclName ?? "");
+        acl.addEventListener("focus", () => refreshAclOptions(acl.value));
+        enabled.addEventListener("change", () => {
+            if (!enabled.checked) { return; }
+            refreshAclOptions(acl.value);
+            const nat = readNat();
+            if (nat) {
+                inside.value ||= nat.insideInterfaceId;
+                outside.value ||= nat.outsideInterfaceId;
+            }
+        });
+        settings.append(this.validatedField(`${prefix}.aclName`, "ACL für zu übersetzenden Verkehr", acl),
+            this.validatedField(`${prefix}.insideInterfaceId`, "Inside-Interface", inside),
+            this.validatedField(`${prefix}.outsideInterfaceId`, "Outside-Interface für Overload", outside));
+
+        return () => ({
+            aclName: acl.value,
+            insideInterfaceId: inside.value,
+            outsideInterfaceId: outside.value
         });
     }
 
@@ -879,6 +927,20 @@ export class DeviceConfigurationForm {
             };
         });
 
+        const aclControl = protocolControls.find(({ type }) => type === ProtocolType.Acl);
+        const natControl = protocolControls.find(({ type }) => type === ProtocolType.Nat);
+        const patIndex = protocolControls.findIndex(({ type }) => type === ProtocolType.Pat);
+        const patControl = protocolControls[patIndex];
+        const readPat = patControl && this.appendPatSettings(
+            patControl.settings,
+            patControl.enabled,
+            device,
+            draft.protocols.find(({ type }) => type === ProtocolType.Pat)?.pat,
+            patIndex,
+            () => (aclControl?.enabled.checked ? aclControl.readAcl?.() ?? [] : []),
+            () => (natControl?.enabled.checked ? natControl.readNat?.() : undefined)
+        );
+
         if (!protocolControls.length) {
             protocols.append(document.createTextNode("Keine Protokolle für diesen Gerätetyp."));
         }
@@ -921,6 +983,7 @@ export class DeviceConfigurationForm {
                     enabled: enabled.checked,
                     ...(readAcl ? { acls: readAcl() } : {}),
                     ...(readNat ? { nat: readNat() } : {}),
+                    ...(type === ProtocolType.Pat && readPat ? { pat: readPat() } : {}),
 
                     ...(type === ProtocolType.Rip
                         ? {

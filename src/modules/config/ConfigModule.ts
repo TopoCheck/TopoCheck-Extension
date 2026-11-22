@@ -8,6 +8,7 @@ import { NatConfigGenerator } from "./NatConfigGenerator";
 import {
     AclProtocol,
     NatProtocol,
+    PatProtocol,
     RipProtocol,
     OspfProtocol
 } from "../../models/ciscoProtocols";
@@ -59,7 +60,10 @@ export class ConfigModule implements IModule {
             const nat = device.protocols.find(
                 (protocol): protocol is NatProtocol => protocol instanceof NatProtocol && protocol.enabled
             );
-            const hasSecurityConfiguration = !!(acl || nat);
+            const pat = device.protocols.find(
+                (protocol): protocol is PatProtocol => protocol instanceof PatProtocol && protocol.enabled
+            );
+            const hasSecurityConfiguration = !!(acl || nat || pat);
             if (ripEnabled) {
                 configurations.push(this.ripGenerator.generate(device));
                 if (hasSecurityConfiguration) { configurations.push(" exit"); }
@@ -76,6 +80,9 @@ export class ConfigModule implements IModule {
             }
             if (acl) {
                 configurations.push(...this.aclGenerator.generate(device, acl, interfaceCommands));
+            }
+            if (pat) {
+                configurations.push(this.natGenerator.generatePat(device, pat, interfaceCommands));
             }
             for (const [name, commands] of interfaceCommands) {
                 configurations.push(`interface ${name}`, ...commands, " exit");
