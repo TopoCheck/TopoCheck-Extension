@@ -1,4 +1,3 @@
-export * from "./types";
 import { planSwitching } from "./planSwitching";
 import { renderSwitchIos } from "./renderSwitchIos";
 import type { SwitchingOptions, SwitchingTopologyInput, SwitchingWarning } from "./types";
