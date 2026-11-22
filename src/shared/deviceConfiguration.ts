@@ -74,7 +74,6 @@ function isRipConfiguration(value: unknown): boolean {
         (config.noAutoSummary === undefined ||
             typeof config.noAutoSummary === "boolean") &&
         Array.isArray(config.networks) &&
-    return Array.isArray(config.networks) &&
         config.networks.length <= 1024 &&
         config.networks.every((network: unknown) => {
             if (!network || typeof network !== "object") { return false; }
@@ -377,7 +376,7 @@ export function buildConfiguredDevice(device: Device, data: DeviceConfiguration,
                 ospf.disable();
             }
             model.addProtocol(ospf);
-                } else if (protocol.type === ProtocolType.Dhcp) {
+            } else if (protocol.type === ProtocolType.Dhcp) {
             const dhcp = new DhcpProtocol(id);
 
             if (protocol.dhcp !== undefined) {

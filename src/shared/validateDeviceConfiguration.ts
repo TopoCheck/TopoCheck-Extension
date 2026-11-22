@@ -309,6 +309,7 @@ function validateInterfaceAddress(
 // ---------------------------------------------------------------------------
 
 function validateProtocols(
+    device: Device,
     deviceType: DeviceType | undefined,
     data: DeviceConfiguration,
     report: Report
@@ -344,7 +345,7 @@ function validateProtocols(
             const routes = protocol.staticRoutes?.routes ?? [];
 
             if (routes.length === 0) {
-                add(
+                report(
                     `${field}.staticRoutes.routes`,
                     "static-route-required",
                     "Für statische Routen muss mindestens eine Route vorhanden sein."
@@ -355,7 +356,7 @@ function validateProtocols(
                 const routeField = `${field}.staticRoutes.routes.${routeIndex}`;
 
                 if (!isValidIpv4Address(route.destination)) {
-                    add(
+                    report(
                         `${routeField}.destination`,
                         "static-route-destination-invalid",
                         "Bitte eine gültige IPv4-Zieladresse angeben."
@@ -363,7 +364,7 @@ function validateProtocols(
                 }
 
                 if (!isValidSubnetMask(route.subnetMask)) {
-                    add(
+                    report(
                         `${routeField}.subnetMask`,
                         "static-route-mask-invalid",
                         "Bitte eine gültige Subnetzmaske angeben."
@@ -375,7 +376,7 @@ function validateProtocols(
                     route.nextHop.trim() !== "" &&
                     !isValidIpv4Address(route.nextHop)
                 ) {
-                    add(
+                    report(
                         `${routeField}.nextHop`,
                         "static-route-next-hop-invalid",
                         "Bitte eine gültige IPv4-Adresse für den Next Hop angeben."
@@ -389,7 +390,7 @@ function validateProtocols(
                         (iface) => iface.name === route.outgoingInterface
                     )
                 ) {
-                    add(
+                    report(
                         `${routeField}.outgoingInterface`,
                         "static-route-interface-invalid",
                         "Das ausgewählte Ausgangsinterface gehört nicht zu diesem Gerät."
@@ -400,7 +401,7 @@ function validateProtocols(
                     (!route.nextHop || route.nextHop.trim() === "") &&
                     (!route.outgoingInterface || route.outgoingInterface.trim() === "")
                 ) {
-                    add(
+                    report(
                         `${routeField}.nextHop`,
                         "static-route-target-required",
                         "Bitte entweder einen Next Hop oder ein Ausgangsinterface angeben."
@@ -415,7 +416,7 @@ function validateProtocols(
                         route.administrativeDistance > 255
                     )
                 ) {
-                    add(
+                    report(
                         `${routeField}.administrativeDistance`,
                         "static-route-distance-invalid",
                         "Die Administrative Distanz muss eine ganze Zahl zwischen 1 und 255 sein."
@@ -557,7 +558,6 @@ export function validateDeviceConfiguration(
     const deviceType = validateDeviceModel(device, report);
     validateGeneral(data, otherHostnames, report);
     validateInterfaces(device, data, report);
-    validateProtocols(deviceType, data, report);
-
+    validateProtocols(device, deviceType, data, report);
     return errors;
 }
