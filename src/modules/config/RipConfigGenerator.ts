@@ -1,4 +1,3 @@
-
 import { DeviceType } from "../../models/deviceType";
 import { NetworkDevice } from "../../models/networkDevice";
 import { RipProtocol } from "../../models/ciscoProtocols";
@@ -8,7 +7,7 @@ export class RipConfigGenerator {
     public generate(device: NetworkDevice): string {
         if (device.type !== DeviceType.Router) {
             throw new Error(
-                `RIP configuration can only be generated for routers.`
+                "RIP configuration can only be generated for routers."
             );
         }
 
@@ -43,7 +42,7 @@ export class RipConfigGenerator {
 
         const lines = [
             "router rip",
-            ` version ${ripProtocol.version ?? 2}`,
+            ` version ${ripProtocol.version}`,
             ...(ripProtocol.noAutoSummary ? [" no auto-summary"] : []),
             ...Array.from(networks)
                 .sort()
