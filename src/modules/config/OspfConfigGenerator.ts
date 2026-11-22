@@ -111,6 +111,7 @@ export class OspfConfigGenerator {
                     ` network ${network.address} ${network.wildcardMask} area ${network.area}`
                 );
             }
+            lines.push(" exit");
             blocks.push(lines.join("\n"));
         }
 

@@ -1,6 +1,6 @@
 /**
  * "Topologie absenden": legt je Gerät eine Konfigurationsdatei im Arbeitsbereich an.
- *   generate – TopoCheck erzeugt die Konfiguration (derzeit Switching aus H3b)
+ *   generate – TopoCheck erzeugt die Konfiguration für Router und Switches
  *   write    – leere Vorlage, der Benutzer schreibt selbst; geprüft wird im Editor
  */
 
@@ -8,17 +8,18 @@ import * as vscode from "vscode";
 import { generateSwitchingConfigurations, switchingInputFromTopology } from "../../generator/switching";
 import type { Device, Topology } from "../topology/models";
 import type { TopologyStore } from "../topology/TopologyStore";
+import type { ConfigModule } from "./ConfigModule";
 
 export type SubmissionMode = "generate" | "write";
 
 const output = vscode.window.createOutputChannel("TopoCheck");
 
-export async function submitTopology(store: TopologyStore, topologyId: string, mode: SubmissionMode): Promise<void> {
+export async function submitTopology(store: TopologyStore, config: ConfigModule, topologyId: string, mode: SubmissionMode): Promise<void> {
     const topology = await store.loadTopology(topologyId);
     const folder = await targetFolder(topology);
     if (!folder) { return; }
 
-    const files = mode === "generate" ? generatedFiles(topology) : templateFiles(topology);
+    const files = mode === "generate" ? await generatedFiles(store, config, topology) : templateFiles(topology);
     if (!files.length) {
         void vscode.window.showWarningMessage("TopoCheck: Die Topologie enthält keine Geräte, für die eine Konfiguration erstellt werden kann.");
         return;
@@ -45,19 +46,24 @@ export async function submitTopology(store: TopologyStore, topologyId: string, m
     const first = vscode.Uri.joinPath(folder, files[0].name);
     await vscode.window.showTextDocument(first, { viewColumn: vscode.ViewColumn.One, preview: false });
     void vscode.window.showInformationMessage(mode === "generate"
-        ? `TopoCheck: Switching-Konfiguration für ${files.length} Switch(es) erzeugt.`
+        ? `TopoCheck: ${files.length} Konfigurationsdatei(en) erzeugt.`
         : `TopoCheck: ${files.length} Vorlage(n) angelegt – Fehler werden beim Schreiben markiert.`);
 }
 
-function generatedFiles(topology: Topology) {
+async function generatedFiles(store: TopologyStore, configModule: ConfigModule, topology: Topology) {
     const { input, warnings: adapterWarnings } = switchingInputFromTopology(topology);
     const { configs, warnings } = generateSwitchingConfigurations(input);
     reportWarnings(topology, [...adapterWarnings, ...warnings]);
-    return configs.map((config) => {
+    const files = configs.map((config) => {
         const device = topology.devices.find((item) => item.id === config.deviceId)!;
-        // hostname vorerst hier, bis die Grundkonfiguration (H3c) zusammengeführt wird; der Parser benötigt ihn.
-        return { device, name: fileName(device), content: `hostname ${device.hostname}\n!\n${config.config}` };
+        return { device, name: fileName(device), content: config.config };
     });
+    for (const device of topology.devices) {
+        if (device.type !== "router") { continue; }
+        const router = await store.loadNetworkDevice(topology.id, device.id);
+        files.push({ device, name: fileName(device), content: configModule.generateForRouter(router) });
+    }
+    return files;
 }
 
 function templateFiles(topology: Topology) {

@@ -47,7 +47,7 @@ export class DhcpConfigGenerator {
                 throw new Error(`Invalid DNS server: ${pool.dnsServer}`);
             }
 
-            configuration.push("");
+            if (configuration.length > 0) { configuration.push(""); }
 
             for (const address of pool.excludedAddresses ?? []) {
                 if (!isValidIpv4Address(address)) {

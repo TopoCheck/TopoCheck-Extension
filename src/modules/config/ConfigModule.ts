@@ -1,4 +1,6 @@
 
+import { formatIosSection, joinIosBlocks } from "../../generator/iosSections";
+import type { NetworkDevice } from "../../models/networkDevice";
 import { IModule } from "../../core/interfaces/IModule";
 import { TopologyStore } from "../topology/TopologyStore";
 import { RipConfigGenerator } from "./RipConfigGenerator";
@@ -49,62 +51,7 @@ export class ConfigModule implements IModule {
                 router.id
             );
 
-            const blocks: string[] = [];
-
-            const ripEnabled = device.protocols.some(
-                protocol => protocol instanceof RipProtocol && protocol.enabled
-            );
-
-            const ospfEnabled = device.protocols.some(
-                protocol => protocol instanceof OspfProtocol && protocol.enabled
-            );
-            const acl = device.protocols.find(
-                (protocol): protocol is AclProtocol =>
-                    protocol instanceof AclProtocol && protocol.enabled && protocol.configurations.length > 0
-            );
-
-            const nat = device.protocols.find(
-                (protocol): protocol is NatProtocol => protocol instanceof NatProtocol && protocol.enabled
-            );
-            const pat = device.protocols.find(
-                (protocol): protocol is PatProtocol => protocol instanceof PatProtocol && protocol.enabled
-            );
-            const dhcpEnabled = device.protocols.some(
-                protocol => protocol instanceof DhcpProtocol && protocol.enabled
-            );
-
-            const staticRouteEnabled = device.protocols.some(
-                protocol => protocol instanceof StaticRouteProtocol && protocol.enabled
-            );
-
-            if (ripEnabled) {
-                blocks.push(this.ripGenerator.generate(device) + "\n exit");
-            }
-
-            if (ospfEnabled) {
-                blocks.push(this.ospfGenerator.generate(device) + "\n exit");
-            }
-
-            if (dhcpEnabled) {
-                blocks.push(this.dhcpGenerator.generate(device));
-            }
-
-            if (staticRouteEnabled) {
-                blocks.push(this.staticRouteGenerator.generate(device));
-            }
-
-            const interfaceCommands = new Map<string, string[]>();
-            if (nat) {
-                blocks.push(this.natGenerator.generate(device, nat, interfaceCommands).join("\n"));
-            }
-            if (acl) {
-                blocks.push(...this.aclGenerator.generate(device, acl, interfaceCommands));
-            }
-            if (pat) {
-                blocks.push(this.natGenerator.generatePat(device, pat, interfaceCommands));
-            }
-
-            const content = this.basicGenerator.generate(device, blocks, interfaceCommands) + "\n\nend";
+            const content = this.generateForRouter(device);
 
             await this.store.saveGeneratedConfig(
                 topologyId,
@@ -120,5 +67,62 @@ export class ConfigModule implements IModule {
         }
 
         return generatedCount;
+    }
+
+    generateForRouter(device: NetworkDevice): string {
+        const routing: string[] = [];
+
+        const ripEnabled = device.protocols.some(
+            protocol => protocol instanceof RipProtocol && protocol.enabled
+        );
+
+        const ospfEnabled = device.protocols.some(
+            protocol => protocol instanceof OspfProtocol && protocol.enabled
+        );
+        const acl = device.protocols.find(
+            (protocol): protocol is AclProtocol =>
+                protocol instanceof AclProtocol && protocol.enabled && protocol.configurations.length > 0
+        );
+
+        const nat = device.protocols.find(
+            (protocol): protocol is NatProtocol => protocol instanceof NatProtocol && protocol.enabled
+        );
+        const pat = device.protocols.find(
+            (protocol): protocol is PatProtocol => protocol instanceof PatProtocol && protocol.enabled
+        );
+        const dhcpEnabled = device.protocols.some(
+            protocol => protocol instanceof DhcpProtocol && protocol.enabled
+        );
+
+        const staticRouteEnabled = device.protocols.some(
+            protocol => protocol instanceof StaticRouteProtocol && protocol.enabled
+        );
+
+        if (staticRouteEnabled) {
+            routing.push(this.staticRouteGenerator.generate(device));
+        }
+        if (ripEnabled) {
+            routing.push(this.ripGenerator.generate(device) + "\n exit");
+        }
+        if (ospfEnabled) {
+            routing.push(this.ospfGenerator.generate(device));
+        }
+
+        const interfaceCommands = new Map<string, string[]>();
+        const translations: string[] = [];
+        if (nat) {
+            translations.push(this.natGenerator.generate(device, nat, interfaceCommands).join("\n"));
+        }
+        if (pat) {
+            translations.push(this.natGenerator.generatePat(device, pat, interfaceCommands));
+        }
+
+        const sections = [
+            formatIosSection("Routing", routing),
+            formatIosSection("DHCP", dhcpEnabled ? [this.dhcpGenerator.generate(device)] : []),
+            formatIosSection("IPv4-ACLs", acl ? this.aclGenerator.generate(device, acl, interfaceCommands) : []),
+            formatIosSection("NAT und PAT", translations)
+        ];
+        return joinIosBlocks([this.basicGenerator.generate(device, sections, interfaceCommands), "end"]) + "\n";
     }
 }

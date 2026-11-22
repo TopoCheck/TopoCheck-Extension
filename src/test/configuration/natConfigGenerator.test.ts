@@ -53,11 +53,14 @@ suite("NAT and PAT configuration generation", () => {
         const generator = new ConfigModule(store);
         assert.strictEqual(await generator.generateForTopology(topologyId), 1);
         assert.strictEqual(await readConfig(), [
+            "! --- Grundkonfiguration ---",
             `hostname ${router.hostname}`, "no ip domain-lookup", "",
+            "! --- NAT und PAT ---",
             "ip nat inside source static 192.168.1.5 203.0.113.5",
             "ip nat inside source static 192.168.1.6 203.0.113.6", "",
+            "! --- Interfaces ---",
             `interface ${router.interfaces[0].name}`, " shutdown", " ip nat inside", " exit", "",
-            `interface ${router.interfaces[1].name}`, " shutdown", " ip nat outside", " exit", "", "end"
+            `interface ${router.interfaces[1].name}`, " shutdown", " ip nat outside", " exit", "", "end", ""
         ].join("\n"));
 
         draft.protocols[0].enabled = false;
@@ -129,18 +132,32 @@ suite("NAT and PAT configuration generation", () => {
 
         assert.strictEqual(await new ConfigModule(store).generateForTopology(topologyId), 1);
         assert.strictEqual(await readConfig(), [
+            "! --- Grundkonfiguration ---",
             `hostname ${router.hostname}`, "no ip domain-lookup", "",
+            "! --- IPv4-ACLs ---",
             "ip access-list extended PAT_SOURCES", " permit ip 192.168.1.0 0.0.0.255 any", " exit", "",
+            "! --- NAT und PAT ---",
             `ip nat inside source list PAT_SOURCES interface ${router.interfaces[1].name} overload`, "",
+            "! --- Interfaces ---",
             `interface ${router.interfaces[0].name}`, " shutdown", " ip nat inside", " exit", "",
-            `interface ${router.interfaces[1].name}`, " shutdown", " ip nat outside", " exit", "", "end"
+            `interface ${router.interfaces[1].name}`, " shutdown", " ip nat outside", " exit", "", "end", ""
         ].join("\n"));
     });
 
-    test("generates OSPF, static NAT and PAT together without repeating interface roles", async () => {
+    test("groups routing, DHCP, ACL and translations without repeating interface roles", async () => {
         const { draft, pat } = patDraft();
+        draft.interfaces[0].enabled = true;
+        draft.interfaces[0].ipAddress = "192.168.1.1";
+        draft.interfaces[0].subnetMask = "255.255.255.0";
+        draft.consolePassword = "test-console";
         draft.protocols.push(
             { type: ProtocolType.Nat, enabled: true, nat },
+            { type: ProtocolType.Dhcp, enabled: true, dhcp: { pools: [
+                { name: "LAN", interfaceName: router.interfaces[0].name, excludedAddresses: ["192.168.1.1"] }
+            ] } },
+            { type: ProtocolType.StaticRoute, enabled: true, staticRoutes: { routes: [
+                { destination: "0.0.0.0", subnetMask: "0.0.0.0", nextHop: "203.0.113.2" }
+            ] } },
             { type: ProtocolType.Ospf, enabled: true, ospf: { processes: [{
                 processId: 1,
                 networks: [{ address: "192.168.1.0", wildcardMask: "0.0.0.255", area: "0" }],
@@ -155,8 +172,14 @@ suite("NAT and PAT configuration generation", () => {
         const generator = new ConfigModule(store);
         assert.strictEqual(await generator.generateForTopology(topologyId), 1);
         const config = await readConfig();
-        assert.ok(config.includes("router ospf 1\n network 192.168.1.0 0.0.0.255 area 0\n\nrouter ospf 2"));
-        assert.ok(config.includes(" network 192.168.2.0 0.0.0.255 area 0\n exit\n\nip nat inside source static"));
+        assert.deepStrictEqual(config.match(/^! --- .+ ---$/gm), [
+            "! --- Grundkonfiguration ---", "! --- Konsolen- und VTY-Zugang ---", "! --- Routing ---",
+            "! --- DHCP ---", "! --- IPv4-ACLs ---", "! --- NAT und PAT ---", "! --- Interfaces ---"
+        ]);
+        assert.ok(config.includes("! --- Routing ---\nip route 0.0.0.0 0.0.0.0 203.0.113.2\n\nrouter ospf 1"));
+        assert.ok(config.includes("router ospf 1\n network 192.168.1.0 0.0.0.255 area 0\n exit\n\nrouter ospf 2"));
+        assert.ok(config.includes(" network 192.168.2.0 0.0.0.255 area 0\n exit\n\n! --- DHCP ---"));
+        assert.ok(config.includes("ip dhcp excluded-address 192.168.1.1\nip dhcp pool LAN"));
         assert.ok(config.includes("ip nat inside source static 192.168.1.5 203.0.113.5"));
         const overload = `ip nat inside source list ${pat.aclName} interface ${router.interfaces[1].name} overload`;
         assert.ok(config.includes(overload));

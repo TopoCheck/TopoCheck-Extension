@@ -60,7 +60,7 @@ export class SubmitTopologyMenu {
         wrapper.className = "submit-topology-wrapper";
         wrapper.append(this.trigger, this.menu);
         const toolbar = root.querySelector(".toolbar");
-        toolbar?.insertBefore(wrapper, toolbar.querySelector(".topology-name"));
+        toolbar?.append(wrapper);
     }
 
     receive(message: ExtensionToWebviewMessage): void {

@@ -53,21 +53,24 @@ suite("IPv4 ACL configuration generation", () => {
         assert.deepStrictEqual(configurationOf(savedRouter).protocols, draft.protocols);
         assert.strictEqual(await new ConfigModule(store).generateForTopology(topologyId), 1);
         assert.strictEqual(await readConfig(), [
+            "! --- Grundkonfiguration ---",
             `hostname ${router.hostname}`,
             "no ip domain-lookup",
             "",
+            "! --- IPv4-ACLs ---",
             "ip access-list extended LAB_FILTER",
             " deny ip host 192.0.2.4 any",
             " permit ip 192.0.2.0 0.0.0.255 any",
             " deny ip any host 198.51.100.1",
             " exit", "",
+            "! --- Interfaces ---",
             `interface ${router.interfaces[0].name}`,
             " shutdown",
             " ip access-group LAB_FILTER in",
             " exit", "",
             `interface ${router.interfaces[1].name}`,
             " shutdown", " exit", "",
-            "end"
+            "end", ""
         ].join("\n"));
     });
 
@@ -82,7 +85,7 @@ suite("IPv4 ACL configuration generation", () => {
         const generator = new ConfigModule(store);
         assert.strictEqual(await generator.generateForTopology(topologyId), 1);
         const config = await readConfig();
-        assert.ok(config.includes(" network 10.0.0.0\n exit\n\nip access-list extended LAB_FILTER"));
+        assert.ok(config.includes(" network 10.0.0.0\n exit\n\n! --- IPv4-ACLs ---\nip access-list extended LAB_FILTER"));
         assert.ok(!config.includes("ip access-group"));
 
         draft.protocols = [{ type: ProtocolType.Acl, enabled: false, acls: [acl] }];
@@ -126,9 +129,10 @@ suite("IPv4 ACL configuration generation", () => {
         assert.ok(config.includes(" deny ip any host 198.51.100.1\n exit\n\nip access-list extended OUTBOUND"));
         assert.ok(config.endsWith([
             "ip access-list extended OUTBOUND", " permit ip any any", " exit", "",
+            "! --- Interfaces ---",
             `interface ${router.interfaces[0].name}`, " shutdown", " ip access-group LAB_FILTER in",
             " ip access-group OUTBOUND out", " exit", "",
-            `interface ${router.interfaces[1].name}`, " shutdown", " exit", "", "end"
+            `interface ${router.interfaces[1].name}`, " shutdown", " exit", "", "end", ""
         ].join("\n")));
     });
 

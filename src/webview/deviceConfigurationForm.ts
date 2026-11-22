@@ -11,10 +11,6 @@ import { svgElement } from "./svg";
 import { vscodeApi } from "./vscodeApi";
 import { defaultSettings, isProtocolComplete } from "../shared/switchingSettings";
 
-const PROTOCOL_LABEL: Partial<Record<ProtocolType, string>> = {
-    [ProtocolType.Vlan]: "VLAN", [ProtocolType.Stp]: "STP", [ProtocolType.Rstp]: "RSTP",
-    [ProtocolType.EtherChannel]: "EtherChannel"
-};
 const MIN_WIDTH = 280;
 /** Diese Protokolle haben eigene Formulare (Routing, DHCP); alle anderen nutzen die aufklappbare Protokollzeile. */
 const FORM_PROTOCOLS: readonly ProtocolType[] = [
@@ -29,7 +25,6 @@ interface ProtocolControl {
     type: ProtocolType;
     selected: HTMLInputElement;
     read(): ProtocolSettings | undefined;
-    refresh(): void;
 }
 
 type FieldControl = HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement;
@@ -285,17 +280,15 @@ export class DeviceConfigurationForm {
     ): () => Ipv4AclConfiguration[] {
         const cards = document.createElement("div");
         const readAcls = new Map<HTMLElement, () => Ipv4AclConfiguration>();
-        const add = button("ACL hinzufügen");
-        add.className = "configuration-add-item";
+        const add = itemButton("ACL hinzufügen", "add");
 
         const addAcl = (acl?: Ipv4AclConfiguration) => {
-            const card = document.createElement("details");
+            const card = document.createElement("section");
             card.className = "configuration-advanced";
-            card.open = acl === undefined || saved.length === 1;
-            const summary = document.createElement("summary");
-            card.append(summary);
-            const remove = button("ACL entfernen");
-            remove.className = "configuration-remove-item";
+            const title = document.createElement("h4");
+            title.className = "configuration-acl-title";
+            card.append(title);
+            const remove = itemButton("ACL entfernen", "remove");
             remove.addEventListener("click", () => {
                 const aclName = name.value.trim();
                 const question = aclName
@@ -311,7 +304,7 @@ export class DeviceConfigurationForm {
                 }, remove);
             });
             const { name, read } = this.appendAclFields(card, device, acl);
-            const updateTitle = () => { summary.textContent = name.value.trim() || "Neue IPv4-ACL"; };
+            const updateTitle = () => { title.textContent = name.value.trim() || "Neue IPv4-ACL"; };
             readAcls.set(card, read);
             updateTitle();
             name.addEventListener("input", updateTitle);
@@ -350,8 +343,7 @@ export class DeviceConfigurationForm {
 
         const rules = document.createElement("div");
         const readRules = new Map<HTMLElement, () => Ipv4AclRule>();
-        const add = button("ACL-Regel hinzufügen");
-        add.className = "configuration-add-item";
+        const add = itemButton("ACL-Regel hinzufügen", "add");
 
         const addRule = (rule?: Ipv4AclRule) => {
             const row = document.createElement("fieldset");
@@ -367,8 +359,7 @@ export class DeviceConfigurationForm {
             const destinationWildcard = input("text", rule?.destinationWildcard ?? "", 15);
             source.placeholder = destination.placeholder = "IPv4-Adresse oder any";
             sourceWildcard.placeholder = destinationWildcard.placeholder = "Leer für Einzeladresse oder any";
-            const remove = button("Regel entfernen");
-            remove.className = "configuration-remove-item";
+            const remove = itemButton("Regel entfernen", "remove");
             remove.addEventListener("click", () => {
                 this.showConfirmation("Möchtest du diese ACL-Regel wirklich entfernen?", "Regel entfernen", "Abbrechen", () => {
                     readRules.delete(row);
@@ -430,8 +421,7 @@ export class DeviceConfigurationForm {
         const outside = layer3InterfaceSelect(device, "Outside-Interface auswählen", saved?.outsideInterfaceId);
         const rows = document.createElement("div");
         const mappings = new Map<HTMLElement, () => StaticNatMapping>();
-        const add = button("NAT-Zuordnung hinzufügen");
-        add.className = "configuration-add-item";
+        const add = itemButton("NAT-Zuordnung hinzufügen", "add");
 
         const addMapping = (mapping?: StaticNatMapping) => {
             const row = document.createElement("fieldset");
@@ -440,8 +430,7 @@ export class DeviceConfigurationForm {
             legend.textContent = "Statische NAT-Zuordnung";
             const local = input("text", mapping?.localAddress ?? "", 15);
             const global = input("text", mapping?.globalAddress ?? "", 15);
-            const remove = button("Zuordnung entfernen");
-            remove.className = "configuration-remove-item";
+            const remove = itemButton("Zuordnung entfernen", "remove");
             remove.addEventListener("click", () => {
                 this.showConfirmation("Möchtest du diese NAT-Zuordnung wirklich entfernen?", "Zuordnung entfernen", "Abbrechen", () => {
                     mappings.delete(row);
@@ -688,7 +677,6 @@ export class DeviceConfigurationForm {
             const saved = draft.protocols.find((item) => item.type === type);
             const settings = saved?.settings ?? defaultSettings(type);
             const item = this.protocolItem(type, saved !== undefined, settings);
-            item.element.classList.add("configuration-protocol-card");
             protocolCards(PROTOCOL_DISPLAY[type].group).append(item.element);
             return item.control;
         });
@@ -712,34 +700,8 @@ export class DeviceConfigurationForm {
         const routingControls = deviceProtocols.filter((type) => FORM_PROTOCOLS.includes(type)).map((type, protocolIndex) => {
             const saved = draft.protocols.find((item) => item.type === type);
             const savedProcesses = saved?.ospf?.processes ?? [];
-            const { label, group } = PROTOCOL_DISPLAY[type];
-            const cards = protocolCards(group);
-
-            const enabled = input("checkbox");
-            enabled.checked = saved?.enabled ?? false;
-            enabled.setAttribute("aria-label", `${label} aktiviert`);
-
-            const settings = document.createElement("div");
-            settings.className = "configuration-protocol-settings";
-
-            const card = document.createElement("div");
-            card.className = "configuration-protocol-card";
-            const toggle = field(label, enabled);
-            toggle.classList.add("configuration-protocol-switch");
-            const status = document.createElement("span");
-            status.className = "configuration-protocol-status";
-            status.setAttribute("aria-hidden", "true");
-            toggle.insertBefore(status, enabled);
-            card.append(toggle, settings);
-            cards.append(card);
-
-            const updateProtocolState = () => {
-                card.dataset.enabled = String(enabled.checked);
-                status.textContent = enabled.checked ? "Aktiv" : "Aus";
-                settings.hidden = !enabled.checked;
-            };
-            enabled.addEventListener("change", updateProtocolState);
-            updateProtocolState();
+            const { card, enabled, settings } = protocolCard(type, saved?.enabled ?? false);
+            protocolCards(PROTOCOL_DISPLAY[type].group).append(card);
 
             const ripNetworkControls: HTMLInputElement[] = [];
 
@@ -826,7 +788,7 @@ export class DeviceConfigurationForm {
                     );
                     excludedAddresses.placeholder = "z. B. 192.168.1.1, 192.168.1.10";
 
-                    const remove = button("Pool entfernen");
+                    const remove = itemButton("DHCP-Pool entfernen", "remove");
                     remove.addEventListener("click", () => {
                         const index = dhcpPoolControls.findIndex(
                             (item) => item.name === name
@@ -859,7 +821,7 @@ export class DeviceConfigurationForm {
                     });
                 };
 
-                const addButton = button("DHCP-Pool hinzufügen");
+                const addButton = itemButton("DHCP-Pool hinzufügen", "add");
                 addButton.addEventListener("click", () => addPool());
 
                 if (savedPools.length > 0) {
@@ -873,13 +835,6 @@ export class DeviceConfigurationForm {
 
 
             if (type === ProtocolType.Rip) {
-                const ripSettings = document.createElement("details");
-                ripSettings.className = "configuration-advanced";
-
-                const ripSummary = document.createElement("summary");
-                ripSummary.textContent = "RIP-Einstellungen";
-                ripSettings.append(ripSummary);
-
                 ripVersion = document.createElement("select");
 
                 const version1 = document.createElement("option");
@@ -896,7 +851,7 @@ export class DeviceConfigurationForm {
                 ripNoAutoSummary = input("checkbox");
                 ripNoAutoSummary.checked = saved?.rip?.noAutoSummary ?? true;
 
-                ripSettings.append(
+                settings.append(
                     field("RIP-Version", ripVersion),
                     field("No Auto Summary", ripNoAutoSummary)
                 );
@@ -946,7 +901,7 @@ export class DeviceConfigurationForm {
                         );
 
                         if (index > 0) {
-                            const removeButton = button("Netzwerk entfernen");
+                            const removeButton = itemButton("RIP-Netzwerk entfernen", "remove");
 
                             removeButton.addEventListener("click", () => {
                                 saveRipNetworkValues();
@@ -961,7 +916,7 @@ export class DeviceConfigurationForm {
                     });
                 };
 
-                const addNetworkButton = button("Netzwerk hinzufügen");
+                const addNetworkButton = itemButton("RIP-Netzwerk hinzufügen", "add");
 
                 addNetworkButton.addEventListener("click", () => {
                     saveRipNetworkValues();
@@ -972,19 +927,11 @@ export class DeviceConfigurationForm {
                 networks.append(networkRows, addNetworkButton);
                 renderNetworks();
 
-                ripSettings.append(networks);
-                settings.append(ripSettings);
+                settings.append(networks);
             }
 
 
             if (type === ProtocolType.Ospf) {
-                const ospfSettings = document.createElement("details");
-                ospfSettings.className = "configuration-advanced";
-
-                const ospfSummary = document.createElement("summary");
-                ospfSummary.textContent = "OSPF-Einstellungen";
-                ospfSettings.append(ospfSummary);
-
                 const process = saved?.ospf?.processes?.[0];
 
                 const processId = input("number", String(process?.processId ?? 1));
@@ -1005,7 +952,7 @@ export class DeviceConfigurationForm {
                 const routerId = input("text", process?.routerId ?? "", 15);
                 routerId.placeholder = "Automatische Auswahl";
 
-                ospfSettings.append(
+                settings.append(
                     this.validatedField(
                         `protocol:${type}.ospf.processes.0.processId`,
                         "Process ID (Standard: 1)",
@@ -1063,7 +1010,7 @@ export class DeviceConfigurationForm {
                         const heading = document.createElement("h4");
                         heading.textContent = `Netzwerk ${index + 1}`;
 
-                        const removeButton = button("Netzwerk entfernen");
+                        const removeButton = itemButton("OSPF-Netzwerk entfernen", "remove");
                         removeButton.disabled = networkEntries.length <= 1;
 
                         removeButton.addEventListener("click", () => {
@@ -1096,7 +1043,7 @@ export class DeviceConfigurationForm {
                     });
                 };
 
-                const addNetworkButton = button("Netzwerk hinzufügen");
+                const addNetworkButton = itemButton("OSPF-Netzwerk hinzufügen", "add");
 
                 addNetworkButton.addEventListener("click", () => {
                     saveOspfNetworkValues();
@@ -1113,12 +1060,12 @@ export class DeviceConfigurationForm {
                 ospfNetworks.append(networkRows, addNetworkButton);
                 renderOspfNetworks();
 
-                ospfSettings.append(ospfNetworks);
+                settings.append(ospfNetworks);
 
                 const passiveDefault = input("checkbox");
                 passiveDefault.checked = process?.passiveInterfaceDefault ?? false;
 
-                ospfSettings.append(
+                settings.append(
                     field("Passive Interface Default (Standard: deaktiviert)", passiveDefault)
                 );
 
@@ -1168,8 +1115,7 @@ export class DeviceConfigurationForm {
 
                 renderPassiveInterfaces();
 
-                ospfSettings.append(passiveInterfaces);
-                settings.append(ospfSettings);
+                settings.append(passiveInterfaces);
             }
 
             if (type === ProtocolType.StaticRoute) {
@@ -1245,7 +1191,7 @@ export class DeviceConfigurationForm {
                     administrativeDistance.max = "255";
                     administrativeDistance.placeholder = "1";
 
-                    const remove = button("Route entfernen");
+                    const remove = itemButton("Statische Route entfernen", "remove");
 
                     remove.addEventListener("click", () => {
                         const index = staticRouteControls.findIndex(
@@ -1287,7 +1233,7 @@ export class DeviceConfigurationForm {
                     addRoute();
                 }
 
-                const addButton = button("Statische Route hinzufügen");
+                const addButton = itemButton("Statische Route hinzufügen", "add");
                 addButton.addEventListener("click", () => addRoute());
 
                 settings.append(routeList, addButton);
@@ -1479,36 +1425,15 @@ export class DeviceConfigurationForm {
         label.focus({ preventScroll: true });
     }
 
-    /** Zeile "☐ VLAN … Aktiviert" mit aufklappbarem Formular darunter. */
     private protocolItem(type: ProtocolType, checked: boolean, settings: ProtocolSettings | undefined) {
-        const element = document.createElement("div"); element.className = "configuration-protocol";
-        const row = document.createElement("div"); row.className = "configuration-protocol-row";
-        const selected = input("checkbox"); selected.checked = checked;
-        selected.setAttribute("aria-label", `${PROTOCOL_LABEL[type] ?? type.toUpperCase()} verwenden`);
-        const toggle = button(PROTOCOL_LABEL[type] ?? type.toUpperCase()); toggle.className = "configuration-protocol-toggle";
-        const badge = document.createElement("span"); badge.className = "configuration-protocol-badge";
-        const panel = document.createElement("div"); panel.className = "configuration-protocol-panel";
-        panel.id = `protocol-panel-${type}`; panel.hidden = true;
-        toggle.setAttribute("aria-controls", panel.id);
-        row.append(selected, toggle, badge);
-
         const body = this.protocolPanel(type, settings);
+        const { card, enabled, settings: panel, refresh } = protocolCard(
+            type, checked, () => isProtocolComplete(type, body.read())
+        );
         panel.append(body.element);
-        const refresh = () => {
-            const complete = isProtocolComplete(type, body.read());
-            badge.textContent = !selected.checked ? "" : complete ? "Aktiviert" : "Unvollständig";
-            badge.dataset.state = complete ? "complete" : "incomplete";
-        };
-        let expanded = false;
-        const expand = (open: boolean) => { expanded = open; panel.hidden = !open; toggle.setAttribute("aria-expanded", String(open)); };
-        toggle.addEventListener("click", () => expand(!expanded));
-        // Auswählen klappt die Eingaben auf, Abwählen wieder zu.
-        selected.addEventListener("change", () => { expand(selected.checked); refresh(); });
         panel.addEventListener("input", refresh);
         panel.addEventListener("change", refresh);
-        expand(false); refresh();
-        element.append(row, panel);
-        return { element, control: { type, selected, read: body.read, refresh } satisfies ProtocolControl };
+        return { element: card, control: { type, selected: enabled, read: body.read } satisfies ProtocolControl };
     }
 
     private protocolPanel(type: ProtocolType, settings: ProtocolSettings | undefined): { element: HTMLElement; read(): ProtocolSettings | undefined } {
@@ -1549,7 +1474,9 @@ export class DeviceConfigurationForm {
             idInput.setAttribute("aria-label", "VLAN-ID");
             const nameInput = input("text", name, 32); nameInput.placeholder = "Name, z. B. Clients";
             nameInput.setAttribute("aria-label", "VLAN-Name");
-            const remove = button("×"); remove.className = "configuration-vlan-remove";
+            const remove = itemButton("", "remove");
+            remove.classList.add("configuration-vlan-remove");
+            remove.title = "VLAN entfernen";
             remove.setAttribute("aria-label", "VLAN entfernen");
             const entry = { id: idInput, name: nameInput };
             remove.addEventListener("click", () => {
@@ -1561,7 +1488,8 @@ export class DeviceConfigurationForm {
             list.append(row); rows.push(entry);
         };
         for (const vlan of settings?.vlans ?? []) { addRow(String(vlan.id), vlan.name); }
-        const add = button("+ VLAN hinzufügen"); add.className = "configuration-secondary configuration-vlan-add";
+        const add = itemButton("VLAN hinzufügen", "add");
+        add.classList.add("configuration-vlan-add");
         add.addEventListener("click", () => { addRow(); rows[rows.length - 1].id.focus(); });
         const native = input("number", String(settings?.nativeVlan ?? "")); native.min = "1"; native.max = "4094";
 
@@ -1625,6 +1553,46 @@ function input(type: string, value = "", maxLength?: number): HTMLInputElement {
         return element;
     }
 }
+function protocolCard(type: ProtocolType, checked: boolean, isComplete = () => true) {
+    const { label } = PROTOCOL_DISPLAY[type];
+    const enabled = input("checkbox");
+    enabled.checked = checked;
+    enabled.setAttribute("aria-label", `${label} aktiviert`);
+
+    const settings = document.createElement("div");
+    settings.className = "configuration-protocol-settings";
+    settings.id = `protocol-settings-${type}`;
+    enabled.setAttribute("aria-controls", settings.id);
+
+    const card = document.createElement("div");
+    card.className = "configuration-protocol-card";
+    const toggle = field(label, enabled);
+    toggle.classList.add("configuration-protocol-switch");
+    const status = document.createElement("span");
+    status.className = "configuration-protocol-status";
+    status.setAttribute("aria-hidden", "true");
+    toggle.insertBefore(status, enabled);
+    card.append(toggle, settings);
+
+    const refresh = () => {
+        const active = enabled.checked;
+        const incomplete = active && !isComplete();
+        card.dataset.enabled = String(active);
+        status.classList.toggle("configuration-protocol-incomplete", incomplete);
+        status.textContent = incomplete ? "Unvollständig" : active ? "Aktiv" : "Aus";
+        settings.hidden = !active;
+    };
+    enabled.addEventListener("change", refresh);
+    refresh();
+    return { card, enabled, settings, refresh };
+}
+
+function itemButton(text: string, action: "add" | "remove"): HTMLButtonElement {
+    const control = button(text);
+    control.className = `configuration-${action}-item`;
+    return control;
+}
+
 function button(text: string): HTMLButtonElement {
     const result = document.createElement("button"); result.type = "button"; result.textContent = text;
     return result;

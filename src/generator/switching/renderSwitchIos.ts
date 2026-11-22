@@ -3,45 +3,32 @@
  * Erzeugt aus dem Soll-Modell eines Switches Cisco-IOS-Konfigurationstext
  */
 
+import { formatIosSection, joinIosBlocks } from "../iosSections";
 import type { SwitchportConfiguration } from "../../models/ciscoProtocols";
 import type { PortChannelPlan, PortPlan, SwitchPlan } from "./types";
 
 export function renderSwitchIos(plan: SwitchPlan): string {
-    const lines: string[] = [];
-
-    lines.push(`! ===== Switching-Konfiguration fuer ${plan.hostname} (TopoCheck H3b) =====`);
-    lines.push("!");
-
-    if (plan.vlans.length) {
-        lines.push("! --- VLANs ---");
-        for (const vlan of plan.vlans) {
-            lines.push(`vlan ${vlan.vlanId}`);
-            if (vlan.name) {
-                lines.push(` name ${vlan.name}`);
-            }
-            lines.push(" exit");
-        }
-        lines.push("!");
-    }
-
-    lines.push("! --- Spanning Tree ---");
-    lines.push(`spanning-tree mode ${plan.stp.mode}`);
+    const vlans = plan.vlans.map((vlan) => [
+        `vlan ${vlan.vlanId}`,
+        ...(vlan.name ? [` name ${vlan.name}`] : []),
+        " exit"
+    ].join("\n"));
+    const spanningTree = [`spanning-tree mode ${plan.stp.mode}`];
     if (plan.stp.priority !== undefined) {
-        lines.push(`! ${plan.stp.rootRole === "primary" ? "Primary" : "Secondary"} Root Bridge`);
-        lines.push(`spanning-tree vlan ${formatVlanList(plan.stp.vlans)} priority ${plan.stp.priority}`);
+        spanningTree.push(
+            `! ${plan.stp.rootRole === "primary" ? "Primary" : "Secondary"} Root Bridge`,
+            `spanning-tree vlan ${formatVlanList(plan.stp.vlans)} priority ${plan.stp.priority}`
+        );
     }
-    lines.push("!");
 
-    lines.push("! --- Interfaces ---");
-    for (const port of plan.ports) {
-        lines.push(...renderPort(port));
-    }
-    for (const channel of plan.portChannels) {
-        lines.push(...renderPortChannel(channel));
-    }
-    lines.push("end");
-
-    return lines.join("\n") + "\n";
+    return joinIosBlocks([
+        formatIosSection("Grundkonfiguration", [`hostname ${plan.hostname}`]),
+        formatIosSection("VLANs", vlans),
+        formatIosSection("Spanning Tree", [spanningTree.join("\n")]),
+        formatIosSection("Interfaces", plan.ports.map((port) => renderPort(port).join("\n"))),
+        formatIosSection("EtherChannel", plan.portChannels.map((channel) => renderPortChannel(channel).join("\n"))),
+        "end"
+    ]) + "\n";
 }
 
 function renderPort(port: PortPlan): string[] {
@@ -61,7 +48,6 @@ function renderPort(port: PortPlan): string[] {
     }
     lines.push(port.shutdown ? " shutdown" : " no shutdown");
     lines.push(" exit");
-    lines.push("!");
     return lines;
 }
 
@@ -70,8 +56,7 @@ function renderPortChannel(channel: PortChannelPlan): string[] {
         `interface Port-channel${channel.number}`,
         ` description EtherChannel (LACP) to ${channel.peerHostname}`,
         ...renderSwitchport(channel.switchport, channel.nonegotiate),
-        " exit",
-        "!"
+        " exit"
     ];
 }
 

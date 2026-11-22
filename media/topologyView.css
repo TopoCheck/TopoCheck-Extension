@@ -123,13 +123,6 @@ body {
     flex: 1;
 }
 
-.topology-name {
-    overflow: hidden;
-    color: var(--vscode-descriptionForeground);
-    white-space: nowrap;
-    text-overflow: ellipsis;
-}
-
 /* Zeichenfläche */
 
 .canvas {
@@ -934,8 +927,8 @@ kbd {
 }
 
 .configuration-protocol-switch {
-    min-height: 34px;
-    padding: 0 8px;
+    min-height: 40px;
+    padding: 0 10px;
     cursor: pointer;
     font-weight: 600;
 }
@@ -961,71 +954,25 @@ kbd {
 }
 
 .configuration-protocol-settings:not([hidden]):not(:empty) {
-    padding: 9px 8px;
+    padding: 12px 10px;
     border-top: 1px solid var(--vscode-panel-border, #dedfe8);
+}
+
+.configuration-protocol-settings > label + .configuration-checkbox {
+    margin-top: 8px;
 }
 
 .configuration-protocol-settings > .configuration-advanced:first-child {
     margin-top: 0;
 }
 
-.configuration-protocol-row {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 6px 0;
-}
-
-.configuration-protocol-row input {
-    margin: 0;
-    accent-color: var(--configuration-accent);
-}
-
-.device-configuration .configuration-protocol-toggle {
-    flex: 1;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 4px 2px;
-    background: transparent;
-    color: var(--vscode-foreground);
-    text-align: left;
-    font-size: 11px;
-    font-weight: 600;
-}
-
-.device-configuration .configuration-protocol-toggle::after {
-    content: "›";
-    font-size: 14px;
-    color: var(--vscode-descriptionForeground);
-    transition: transform .15s;
-}
-
-.device-configuration .configuration-protocol-toggle[aria-expanded="true"]::after {
-    transform: rotate(90deg);
-}
-
-.device-configuration .configuration-protocol-toggle:hover {
-    background: var(--vscode-toolbar-hoverBackground);
-}
-
-.configuration-protocol-badge {
-    min-width: 70px;
-    text-align: right;
-    font-size: 10px;
-}
-
-.configuration-protocol-badge[data-state="complete"] {
-    color: var(--vscode-testing-iconPassed, #10b981);
-    font-weight: 600;
-}
-
-.configuration-protocol-badge[data-state="incomplete"] {
+.configuration-protocol-card[data-enabled="true"] .configuration-protocol-incomplete {
     color: var(--vscode-editorWarning-foreground, #bd9b35);
 }
 
-.configuration-protocol-panel {
-    padding: 4px 0 12px 24px;
+.configuration-protocol-switch:focus-within {
+    outline: 2px solid var(--vscode-focusBorder);
+    outline-offset: -2px;
 }
 
 .configuration-actions {
@@ -1053,7 +1000,7 @@ kbd {
 }
 
 .device-configuration .configuration-add-item {
-    margin-top: 8px;
+    margin-top: 12px;
     border-color: var(--vscode-button-border, transparent);
     background: var(--vscode-button-background);
     color: var(--vscode-button-foreground);
@@ -1150,51 +1097,6 @@ kbd {
     }
 }
 
-/* Topologie bestätigen – kompaktes Türkis */
-
-.confirm-button {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-
-    width: auto;
-    min-width: 0;
-    padding: 6px 12px;
-
-    border: 1px solid #13838c;
-    border-radius: 6px;
-
-    background: #13838c;
-    color: #ffffff;
-
-    font-family: inherit;
-    font-size: 11px;
-    font-weight: 600;
-
-    white-space: nowrap;
-    cursor: pointer;
-    touch-action: manipulation;
-
-    box-shadow: 0 2px 5px rgba(19, 131, 140, 0.25);
-    transition: all 0.2s ease;
-}
-
-.confirm-button:hover {
-    background: #1699a2;
-    border-color: #1699a2;
-    box-shadow: 0 3px 8px rgba(19, 131, 140, 0.35);
-}
-
-.confirm-button:active {
-    transform: translateY(1px);
-    box-shadow: none;
-}
-
-.confirm-button:focus-visible {
-    outline: 2px solid var(--vscode-focusBorder);
-    outline-offset: 2px;
-}
-
 /* Einklappbare erweiterte Protokolleinstellungen */
 
 .configuration-advanced {
@@ -1205,19 +1107,10 @@ kbd {
     background: var(--vscode-editor-background);
 }
 
-.configuration-advanced summary {
-    cursor: pointer;
+.configuration-acl-title {
+    margin: 0 0 10px;
     font-size: 11px;
     font-weight: 600;
-    color: var(--vscode-foreground);
-}
-
-.configuration-advanced summary:hover {
-    color: var(--vscode-focusBorder);
-}
-
-.configuration-advanced[open] summary {
-    margin-bottom: 12px;
 }
 
 .device-configuration select {
@@ -1248,10 +1141,14 @@ kbd {
 }
 
 .device-configuration .configuration-vlan-remove {
-    padding: 0 9px;
-    background: transparent;
-    color: var(--vscode-descriptionForeground);
-    font-size: 16px;
+    min-width: 28px;
+    margin: 0;
+    padding: 0 7px;
+    font-size: 14px;
+}
+
+.device-configuration .configuration-vlan-remove::before {
+    margin: 0;
 }
 
 .device-configuration .configuration-vlan-add {

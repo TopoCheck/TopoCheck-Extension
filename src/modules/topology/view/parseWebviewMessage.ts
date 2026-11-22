@@ -55,8 +55,6 @@ export function parseWebviewMessage(raw: unknown): WebviewToExtensionMessage | u
         case "submitTopology":
             return message.mode === "generate" || message.mode === "write"
                 ? { type: "submitTopology", mode: message.mode } : undefined;
-        case "confirmTopology":
-            return { type: "confirmTopology" };
 
         case "addDevice":
             if (isDeviceType(message.deviceType) && isFinitePoint(message.position)) {

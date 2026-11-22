@@ -71,7 +71,6 @@ export class TopologyEditor {
     private readonly connectionList: HTMLElement;
     private readonly emptyState: HTMLElement;
     private readonly hint: HTMLElement;
-    private readonly nameLabel: HTMLElement;
     private readonly zoomLabel: HTMLButtonElement;
     private readonly paletteButtons = new Map<DeviceType, HTMLButtonElement>();
     readonly corner: HTMLElement;
@@ -145,25 +144,7 @@ export class TopologyEditor {
             this.setCableMode(!this.cableMode);
         });
         palette.append(this.cableButton);
-        this.nameLabel = htmlElement("span", "topology-name");
-
-        // Topologie bestätigen
-        const confirmButton = htmlElement(
-            "button",
-            "palette-item confirm-button",
-            "Topologie bestätigen"
-        );
-        confirmButton.type = "button";
-        confirmButton.addEventListener("click", () => {
-            vscodeApi.postMessage({ type: "confirmTopology" });
-        });
-
-        toolbar.append(
-            palette,
-            htmlElement("div", "toolbar-spacer"),
-            this.nameLabel,
-            confirmButton
-        );
+        toolbar.append(palette, htmlElement("div", "toolbar-spacer"));
 
         // Zeichenfläche
         this.canvas = htmlElement("main", "canvas");
@@ -413,7 +394,6 @@ export class TopologyEditor {
             }
         }
 
-        this.nameLabel.textContent = this.model.name;
         this.renderer.sync(this.model, (id) => this.positionOf(id));
         this.renderer.setSelected(this.selectedId);
         this.renderInterfacePanel();

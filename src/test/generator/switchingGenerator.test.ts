@@ -251,6 +251,10 @@ suite("H3b Switching-Generator – Cisco-IOS-Ausgabe", () => {
 
     test("erzeugt die erwarteten IOS-Befehle", () => {
         const text = renderSwitchIos(sw(planSwitching(demoTopology()), "SW1"));
+        assert.deepStrictEqual(text.match(/^! --- .+ ---$/gm), [
+            "! --- Grundkonfiguration ---", "! --- VLANs ---", "! --- Spanning Tree ---",
+            "! --- Interfaces ---", "! --- EtherChannel ---"
+        ]);
         for (const expected of [
             "vlan 10\n name Clients\n exit",
             "spanning-tree mode rapid-pvst",
@@ -273,7 +277,7 @@ suite("H3b Switching-Generator – Cisco-IOS-Ausgabe", () => {
 
     test("Round-Trip: der TopoCheck-Parser liest VLANs und Switchports der erzeugten Konfiguration identisch ein", () => {
         const plan = sw(planSwitching(demoTopology()), "SW2");
-        const result = parseCiscoConfig(`hostname SW2\n${renderSwitchIos(plan)}`, { deviceId: "sw2", deviceType: DeviceType.Switch });
+        const result = parseCiscoConfig(renderSwitchIos(plan), { deviceId: "sw2", deviceType: DeviceType.Switch });
         assert.ok(result.device);
         assert.deepStrictEqual(result.diagnostics.filter((d) => d.severity === "error"), []);
         for (const planned of plan.ports) {

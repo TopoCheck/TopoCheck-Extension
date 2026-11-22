@@ -1,4 +1,5 @@
 import { NetworkDevice } from "../../models/networkDevice";
+import { formatIosSection, joinIosBlocks } from "../../generator/iosSections";
 import { DeviceType } from "../../models/deviceType";
 
 export class BasicConfigGenerator {
@@ -34,13 +35,9 @@ export class BasicConfigGenerator {
             configuration.push(`banner motd #${banner}#`);
         }
 
-        if (protocolBlocks.length > 0) {
-            configuration.push("", protocolBlocks.join("\n\n"));
-        }
-
+        const interfaces: string[] = [];
         for (const networkInterface of device.interfaces) {
-            configuration.push("");
-            configuration.push(`interface ${networkInterface.name}`);
+            const lines = [`interface ${networkInterface.name}`];
 
             if (networkInterface.description) {
                 const description = networkInterface.description
@@ -48,7 +45,7 @@ export class BasicConfigGenerator {
                     .trim();
 
                 if (description.length > 0) {
-                    configuration.push(` description ${description}`);
+                    lines.push(` description ${description}`);
                 }
             }
 
@@ -57,39 +54,44 @@ export class BasicConfigGenerator {
                 networkInterface.ipAddress &&
                 networkInterface.subnetMask
             ) {
-                configuration.push(
+                lines.push(
                     ` ip address ${networkInterface.ipAddress} ${networkInterface.subnetMask}`
                 );
             }
 
-            configuration.push(
+            lines.push(
                 networkInterface.enabled ? " no shutdown" : " shutdown"
             );
 
-            configuration.push(...(interfaceCommands?.get(networkInterface.name) ?? []));
-            configuration.push(" exit");
+            lines.push(...(interfaceCommands?.get(networkInterface.name) ?? []));
+            lines.push(" exit");
+            interfaces.push(lines.join("\n"));
         }
 
+        const access: string[] = [];
         if (device.consolePassword) {
-            configuration.push(
-                "",
+            access.push([
                 "line console 0",
                 ` password ${device.consolePassword}`,
                 " login",
                 " exit"
-            );
+            ].join("\n"));
         }
 
         if (device.vtyPassword) {
-            configuration.push(
-                "",
+            access.push([
                 "line vty 0 4",
                 ` password ${device.vtyPassword}`,
                 " login",
                 " exit"
-            );
+            ].join("\n"));
         }
 
-        return configuration.join("\n");
+        return joinIosBlocks([
+            formatIosSection("Grundkonfiguration", [configuration.join("\n")]),
+            formatIosSection("Konsolen- und VTY-Zugang", access),
+            ...protocolBlocks,
+            formatIosSection("Interfaces", interfaces)
+        ]);
     }
 }

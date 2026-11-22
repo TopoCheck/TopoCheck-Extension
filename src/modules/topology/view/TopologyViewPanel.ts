@@ -276,11 +276,7 @@ export class TopologyViewPanel implements vscode.Disposable {
                 await this.postState();
                 return;
             case "submitTopology":
-                await submitTopology(this.store, this.topologyId, message.mode);
-                return;
-
-            case "confirmTopology":
-                await this.confirmTopology();
+                await submitTopology(this.store, this.configModule, this.topologyId, message.mode);
                 return;
 
             case "addDevice":
@@ -321,28 +317,6 @@ export class TopologyViewPanel implements vscode.Disposable {
                 );
                 return;
         }
-    }
-
-    private async confirmTopology(): Promise<void> {
-        const topology = await this.store.loadTopology(this.topologyId);
-
-        const routers = topology.devices.filter(
-            (device) => device.type === "router"
-        );
-
-        if (routers.length === 0) {
-            void vscode.window.showWarningMessage(
-                "TopoCheck: Die Topologie enthält keine Router."
-            );
-            return;
-        }
-
-        const generatedCount =
-            await this.configModule.generateForTopology(this.topologyId);
-
-        void vscode.window.showInformationMessage(
-            `TopoCheck: Topologie bestätigt. ${generatedCount} Router-Konfiguration(en) generiert.`
-        );
     }
 
     /**
