@@ -1,9 +1,10 @@
 {
   "name": "topocheck",
   "displayName": "TopoCheck",
+  "publisher": "TopoCheck",
   "icon": "images/DA_Logo_NEU.jpeg",
   "description": "Netzwerkumgebung zum Erstellen, Verstehen und Validieren von Netzwerkkonfigurationen",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "repository": {
     "type": "git",
     "url": "https://github.com/TopoCheck/TopoCheck-Extension.git"
@@ -12,7 +13,7 @@
     "vscode": "^1.125.0"
   },
   "categories": [
-    "Other"
+    "Education"
   ],
   "activationEvents": [
     "onLanguage:topocheck",
@@ -29,8 +30,7 @@
           "Cisco Configuration"
         ],
         "extensions": [
-          ".cfg",
-          ".ios"
+          ".cfg"
         ]
       }
     ],
