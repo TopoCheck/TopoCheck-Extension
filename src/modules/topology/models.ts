@@ -62,12 +62,29 @@ export interface TopologyOspfConfiguration {
     }[];
 }
 
+export interface TopologyDhcpConfiguration {
+  name: string;
+  interfaceName: string;
+  dnsServer?: string;
+  excludedAddresses?: string[];
+}
+
+export interface TopologyStaticRouteConfiguration {
+  destination: string;
+  subnetMask: string;
+  nextHop?: string;
+  outgoingInterface?: string;
+  administrativeDistance?: number;
+}
+
 export interface DeviceProtocol {
     id: string;
     type: ProtocolType;
     enabled: boolean;
     rip?: TopologyRipConfiguration;
     ospf?: TopologyOspfConfiguration;
+    dhcp?: TopologyDhcpConfiguration[];
+    staticRoutes?: TopologyStaticRouteConfiguration[];
 }
 
 export interface Device extends DeviceAccessConfiguration {
@@ -98,3 +115,5 @@ export interface Topology {
     connections: Connection[];
     layout: TopologyLayout;
 }
+
+

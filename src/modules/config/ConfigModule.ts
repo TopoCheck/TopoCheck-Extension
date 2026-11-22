@@ -3,9 +3,14 @@ import { IModule } from "../../core/interfaces/IModule";
 import { TopologyStore } from "../topology/TopologyStore";
 import { RipConfigGenerator } from "./RipConfigGenerator";
 import { OspfConfigGenerator } from "./OspfConfigGenerator";
+import { BasicConfigGenerator } from "./BasicConfigGenerator";
+import { DhcpConfigGenerator } from "./DhcpConfigGenerator";
+import { StaticRouteConfigGenerator } from "./StaticRouteConfigGenerator";
 import {
     RipProtocol,
-    OspfProtocol
+    OspfProtocol,
+    DhcpProtocol,
+    StaticRouteProtocol, 
 } from "../../models/ciscoProtocols";
 
 export class ConfigModule implements IModule {
@@ -13,7 +18,9 @@ export class ConfigModule implements IModule {
 
     private readonly ripGenerator = new RipConfigGenerator();
     private readonly ospfGenerator = new OspfConfigGenerator();
-
+    private readonly basicGenerator = new BasicConfigGenerator();
+    private readonly dhcpGenerator = new DhcpConfigGenerator();
+    private readonly staticRouteGenerator = new StaticRouteConfigGenerator();
     constructor(private readonly store: TopologyStore) { }
 
     initialize(): void {
@@ -35,7 +42,7 @@ export class ConfigModule implements IModule {
             );
 
             const configurations: string[] = [
-                `hostname ${device.hostname}`
+                this.basicGenerator.generate(device)
             ];
 
             const ripEnabled = device.protocols.some(
@@ -46,6 +53,14 @@ export class ConfigModule implements IModule {
                 protocol => protocol instanceof OspfProtocol && protocol.enabled
             );
 
+            const dhcpEnabled = device.protocols.some(
+                protocol => protocol instanceof DhcpProtocol && protocol.enabled
+            );
+
+            const staticRouteEnabled = device.protocols.some(
+                protocol => protocol instanceof StaticRouteProtocol && protocol.enabled
+            );
+            
             if (ripEnabled) {
                 configurations.push(this.ripGenerator.generate(device));
             }
@@ -54,8 +69,12 @@ export class ConfigModule implements IModule {
                 configurations.push(this.ospfGenerator.generate(device));
             }
 
-            if (!ripEnabled && !ospfEnabled) {
-                continue;
+            if (dhcpEnabled) {
+                configurations.push(this.dhcpGenerator.generate(device));
+            }
+
+            if (staticRouteEnabled) {
+                configurations.push(this.staticRouteGenerator.generate(device));
             }
 
             const content = [

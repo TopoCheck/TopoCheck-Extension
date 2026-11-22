@@ -17,7 +17,7 @@ import {
     Position,
     Topology,
 } from "./models";
-import { RipProtocol, OspfProtocol } from "../../models/ciscoProtocols";
+import { RipProtocol, OspfProtocol, DhcpProtocol, StaticRouteProtocol } from "../../models/ciscoProtocols";
 
 /** Arten von Änderungen auf die andere module reagieren können. */
 export enum TopologyChangeType {
@@ -497,6 +497,32 @@ export class TopologyStore implements vscode.Disposable {
                                     passiveInterfaces: { ...process.passiveInterfaces }
                                 }))
                             }
+                        };
+                    }
+                    if (protocol instanceof DhcpProtocol) {
+                        return {
+                            ...base,
+                            dhcp: protocol.pools.map((pool) => ({
+                                name: pool.name,
+                                interfaceName: pool.interfaceName,
+                                dnsServer: pool.dnsServer,
+                                excludedAddresses: pool.excludedAddresses
+                                    ? [...pool.excludedAddresses]
+                                    : undefined
+                            }))
+                        };
+                    }
+
+                    if (protocol instanceof StaticRouteProtocol) {
+                        return {
+                            ...base,
+                            staticRoutes: protocol.routes.map((route) => ({
+                                destination: route.destination,
+                                subnetMask: route.subnetMask,
+                                nextHop: route.nextHop,
+                                outgoingInterface: route.outgoingInterface,
+                                administrativeDistance: route.administrativeDistance
+                            }))
                         };
                     }
 
