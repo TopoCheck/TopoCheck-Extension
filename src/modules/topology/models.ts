@@ -72,6 +72,7 @@ export interface DeviceProtocol {
     rip?: TopologyRipConfiguration;
     ospf?: TopologyOspfConfiguration;
     acl?: Ipv4AclConfiguration;
+    acls?: Ipv4AclConfiguration[];
 }
 
 export interface Device extends DeviceAccessConfiguration {

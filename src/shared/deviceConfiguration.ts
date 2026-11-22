@@ -7,7 +7,7 @@ import { ProtocolType } from "../models/protocolType";
 import type { Device } from "../modules/topology/models";
 import { DeviceConfigurationValidationError, validateDeviceConfiguration } from "./validateDeviceConfiguration";
 import type { DeviceAccessConfiguration } from "../models/deviceAccessConfiguration";
-import { AclProtocol, Ipv4AclConfiguration, MAX_IPV4_ACL_RULES, RipProtocol, OspfProtocol } from "../models/ciscoProtocols";
+import { AclProtocol, Ipv4AclConfiguration, MAX_IPV4_ACLS, MAX_IPV4_ACL_RULES, RipProtocol, OspfProtocol } from "../models/ciscoProtocols";
 
 export interface DeviceConfiguration extends DeviceAccessConfiguration {
     label?: string;
@@ -24,6 +24,7 @@ export interface DeviceConfiguration extends DeviceAccessConfiguration {
         type: ProtocolType;
         enabled: boolean;
         acl?: Ipv4AclConfiguration;
+        acls?: Ipv4AclConfiguration[];
         rip?: {
             version: 1 | 2;
             noAutoSummary: boolean;
@@ -153,6 +154,8 @@ export function isDeviceConfiguration(value: unknown): value is DeviceConfigurat
                 (protocol.rip === undefined || isRipConfiguration(protocol.rip)) &&
                 (protocol.ospf === undefined || isOspfConfiguration(protocol.ospf)) &&
                 (protocol.acl === undefined || (protocol.type === ProtocolType.Acl && isAclConfiguration(protocol.acl))) &&
+                (protocol.acls === undefined || (protocol.type === ProtocolType.Acl && protocol.acl === undefined &&
+                    Array.isArray(protocol.acls) && protocol.acls.length <= MAX_IPV4_ACLS && protocol.acls.every(isAclConfiguration))) &&
                 (protocol.type === ProtocolType.Rip
                     ? protocol.ospf === undefined
                     : protocol.rip === undefined) &&
@@ -180,8 +183,10 @@ export function configurationOf(device: Device, connectedInterfaceIds: readonly 
                 enabled: protocol.enabled
             };
 
-            if (protocol.acl !== undefined) {
-                result.acl = structuredClone(protocol.acl);
+            if (protocol.acls !== undefined) {
+                result.acls = structuredClone(protocol.acls);
+            } else if (protocol.acl !== undefined) {
+                result.acls = [structuredClone(protocol.acl)];
             }
 
             if (protocol.rip !== undefined) {
@@ -253,8 +258,9 @@ export function buildConfiguredDevice(device: Device, data: DeviceConfiguration,
             (item) => item.type === protocol.type
         )?.id ?? `${device.id}:${protocol.type}`;
 
-        if (protocol.type === ProtocolType.Acl && protocol.acl !== undefined) {
-            model.addProtocol(new AclProtocol(id, protocol.enabled, structuredClone(protocol.acl)));
+        const acls = protocol.acls ?? (protocol.acl === undefined ? undefined : [protocol.acl]);
+        if (protocol.type === ProtocolType.Acl && acls !== undefined) {
+            model.addProtocol(new AclProtocol(id, protocol.enabled, structuredClone(acls)));
         } else if (protocol.type === ProtocolType.Rip) {
             const rip = new RipProtocol(id);
             if (protocol.rip !== undefined) {

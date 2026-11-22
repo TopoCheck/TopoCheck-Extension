@@ -904,6 +904,63 @@ kbd {
     color: var(--vscode-button-secondaryForeground);
 }
 
+.device-configuration .configuration-acl-add,
+.device-configuration .configuration-acl-remove,
+.device-configuration .configuration-delete-confirm {
+    min-height: 28px;
+    padding: 5px 9px;
+    border: 1px solid transparent;
+    font-weight: 600;
+}
+
+.device-configuration .configuration-acl-add {
+    margin-top: 8px;
+    border-color: var(--vscode-button-border, transparent);
+    background: var(--vscode-button-background);
+    color: var(--vscode-button-foreground);
+}
+
+.device-configuration .configuration-acl-add::before {
+    content: "+" / "";
+    margin-inline-end: 6px;
+}
+
+.device-configuration .configuration-acl-add:not(:disabled):hover {
+    background: var(--vscode-button-hoverBackground);
+}
+
+.device-configuration .configuration-acl-remove {
+    margin-top: 8px;
+    border-color: currentColor;
+    background: transparent;
+    color: var(--vscode-errorForeground, #c72e38);
+}
+
+.device-configuration .configuration-acl-remove::before {
+    content: "−" / "";
+    margin-inline-end: 6px;
+}
+
+.device-configuration .configuration-acl-remove:not(:disabled):hover {
+    background: color-mix(in srgb, currentColor 12%, transparent);
+}
+
+.device-configuration .configuration-delete-confirm {
+    background: #ad2935;
+    color: #fff;
+}
+
+.device-configuration .configuration-delete-confirm:not(:disabled):hover {
+    background: #92212c;
+}
+
+.device-configuration .configuration-acl-add:focus-visible,
+.device-configuration .configuration-acl-remove:focus-visible,
+.configuration-switch-notice button:focus-visible {
+    outline: 2px solid var(--vscode-focusBorder);
+    outline-offset: 2px;
+}
+
 .device-configuration button:disabled {
     opacity: .6;
     cursor: wait;

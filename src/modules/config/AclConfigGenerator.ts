@@ -4,20 +4,27 @@ import { NetworkDevice } from "../../models/networkDevice";
 /** Renders the validated ACL from the router's saved device configuration. */
 export class AclConfigGenerator {
     public generate(device: NetworkDevice, protocol: AclProtocol): string {
-        const { name, rules, binding } = protocol.configuration;
-        const lines = [
-            `ip access-list extended ${name}`,
-            ...rules.map((rule) =>
-                ` ${rule.action} ip ${formatAddress(rule.source, rule.sourceWildcard)} ${formatAddress(rule.destination, rule.destinationWildcard)}`),
-            " exit"
-        ];
+        const lines: string[] = [];
+        const interfaceCommands = new Map<string, string[]>();
+        for (const { name, rules, binding } of protocol.configurations) {
+            lines.push(
+                `ip access-list extended ${name}`,
+                ...rules.map((rule) =>
+                    ` ${rule.action} ip ${formatAddress(rule.source, rule.sourceWildcard)} ${formatAddress(rule.destination, rule.destinationWildcard)}`),
+                " exit"
+            );
 
-        if (binding) {
+            if (!binding) { continue; }
             const iface = device.findInterface(binding.interfaceId);
             if (!iface) {
                 throw new Error(`Das Interface der ACL „${name}“ ist auf ${device.hostname} nicht vorhanden.`);
             }
-            lines.push(`interface ${iface.name}`, ` ip access-group ${name} ${binding.direction}`, " exit");
+            const commands = interfaceCommands.get(iface.name) ?? [];
+            commands.push(` ip access-group ${name} ${binding.direction}`);
+            interfaceCommands.set(iface.name, commands);
+        }
+        for (const [name, commands] of interfaceCommands) {
+            lines.push(`interface ${name}`, ...commands, " exit");
         }
 
         return lines.join("\n");

@@ -46,7 +46,7 @@ suite("IPv4 ACL configuration generation", () => {
 
     test("persists ACL rules and generates a router config without RIP or OSPF", async () => {
         const draft = configurationOf(router);
-        draft.protocols = [{ type: ProtocolType.Acl, enabled: true, acl }];
+        draft.protocols = [{ type: ProtocolType.Acl, enabled: true, acls: [acl] }];
         await store.configureDevice(topologyId, router.id, draft);
 
         const [savedRouter] = (await store.loadTopology(topologyId)).devices;
@@ -70,7 +70,7 @@ suite("IPv4 ACL configuration generation", () => {
         delete acl.binding;
         const draft = configurationOf(router);
         draft.protocols = [
-            { type: ProtocolType.Acl, enabled: true, acl },
+            { type: ProtocolType.Acl, enabled: true, acls: [acl] },
             { type: ProtocolType.Rip, enabled: true, rip: { version: 2, noAutoSummary: true, networks: [{ address: "10.0.0.0" }] } }
         ];
         await store.configureDevice(topologyId, router.id, draft);
@@ -80,7 +80,7 @@ suite("IPv4 ACL configuration generation", () => {
         assert.ok(config.includes(" network 10.0.0.0\n exit\nip access-list extended LAB_FILTER"));
         assert.ok(!config.includes("ip access-group"));
 
-        draft.protocols = [{ type: ProtocolType.Acl, enabled: false, acl }];
+        draft.protocols = [{ type: ProtocolType.Acl, enabled: false, acls: [acl] }];
         await store.configureDevice(topologyId, router.id, draft);
         assert.strictEqual(await generator.generateForTopology(topologyId), 0);
     });
@@ -89,10 +89,51 @@ suite("IPv4 ACL configuration generation", () => {
         acl.rules[0].sourceWildcard = "0.0.0.256";
         acl.binding = { interfaceId: "unknown", direction: "out" };
         const draft = configurationOf(router);
-        draft.protocols = [{ type: ProtocolType.Acl, enabled: true, acl }];
+        draft.protocols = [{ type: ProtocolType.Acl, enabled: true, acls: [acl] }];
         await assert.rejects(store.configureDevice(topologyId, router.id, draft),
             (error: unknown) => error instanceof DeviceConfigurationValidationError &&
                 error.errors.some(({ code }) => code === "acl-wildcard-invalid") &&
                 error.errors.some(({ code }) => code === "acl-interface-invalid"));
+    });
+
+    test("loads an older single ACL and generates it alongside a new ACL on the same interface", async () => {
+        const file = vscode.Uri.joinPath(storage, "ACL test", "topology.json");
+        const topology = await store.loadTopology(topologyId);
+        topology.devices[0].protocols = [{ id: "legacy-acl", type: ProtocolType.Acl, enabled: true, acl }];
+        await vscode.workspace.fs.writeFile(file, Buffer.from(JSON.stringify(topology)));
+        const [savedRouter] = (await store.loadTopology(topologyId)).devices;
+        const draft = configurationOf(savedRouter);
+        assert.deepStrictEqual(draft.protocols[0].acls, [acl]);
+        assert.strictEqual(await new ConfigModule(store).generateForTopology(topologyId), 1);
+
+        draft.protocols[0].acls!.push({
+            name: "OUTBOUND",
+            rules: [{ action: "permit", source: "any", sourceWildcard: "", destination: "any", destinationWildcard: "" }],
+            binding: { interfaceId: router.interfaces[0].id, direction: "out" }
+        });
+        await store.configureDevice(topologyId, router.id, draft);
+        const [updatedRouter] = (await store.loadTopology(topologyId)).devices;
+        assert.deepStrictEqual(configurationOf(updatedRouter).protocols, draft.protocols);
+        assert.strictEqual(await new ConfigModule(store).generateForTopology(topologyId), 1);
+
+        const config = await readConfig();
+        assert.ok(config.indexOf("ip access-list extended LAB_FILTER") < config.indexOf("ip access-list extended OUTBOUND"));
+        assert.ok(config.endsWith([
+            "ip access-list extended OUTBOUND", " permit ip any any", " exit",
+            `interface ${router.interfaces[0].name}`, " ip access-group LAB_FILTER in",
+            " ip access-group OUTBOUND out", " exit", "end"
+        ].join("\n")));
+    });
+
+    test("rejects duplicate ACL names and duplicate interface directions", async () => {
+        const draft = configurationOf(router);
+        draft.protocols = [{
+            type: ProtocolType.Acl, enabled: true,
+            acls: [acl, { ...acl, name: acl.name.toLowerCase() }]
+        }];
+        await assert.rejects(store.configureDevice(topologyId, router.id, draft),
+            (error: unknown) => error instanceof DeviceConfigurationValidationError &&
+                error.errors.some(({ code }) => code === "acl-name-duplicate") &&
+                error.errors.some(({ code }) => code === "acl-binding-duplicate"));
     });
 });

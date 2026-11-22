@@ -1,5 +1,5 @@
 import type { Device } from "../modules/topology/models";
-import { Ipv4AclConfiguration, Ipv4AclRule, MAX_IPV4_ACL_RULES } from "../models/ciscoProtocols";
+import { Ipv4AclConfiguration, Ipv4AclRule, MAX_IPV4_ACLS, MAX_IPV4_ACL_RULES } from "../models/ciscoProtocols";
 import { DeviceType } from "../models/deviceType";
 import { ProtocolType } from "../models/protocolType";
 import { compatibleProtocols, configurationOf, DeviceConfiguration } from "../shared/deviceConfiguration";
@@ -94,17 +94,37 @@ export class DeviceConfigurationForm {
     }
 
     private confirmDiscard(text: string, discard: () => void): void {
-        if (!this.switchNotice) { return; }
-        this.switchNotice.replaceChildren();
+        this.showConfirmation(text, "Verwerfen", "Weiter bearbeiten", discard);
+    }
+
+    private showConfirmation(
+        text: string,
+        confirmLabel: string,
+        cancelLabel: string,
+        confirm: () => void,
+        trigger?: HTMLButtonElement
+    ): void {
+        const notice = this.switchNotice;
+        if (!notice) { return; }
+        notice.replaceChildren();
         const message = document.createElement("p");
         message.textContent = text;
-        const yes = button("Verwerfen");
-        yes.addEventListener("click", discard);
-        const no = button("Weiter bearbeiten");
-        no.addEventListener("click", () => { this.switchNotice!.hidden = true; });
-        this.switchNotice.append(message, yes, no);
-        this.switchNotice.hidden = false;
-        this.switchNotice.scrollIntoView({ block: "nearest" });
+        const yes = button(confirmLabel);
+        if (trigger) { yes.className = "configuration-delete-confirm"; }
+        yes.addEventListener("click", () => {
+            notice.hidden = true;
+            confirm();
+        });
+        const no = button(cancelLabel);
+        no.className = "configuration-secondary";
+        no.addEventListener("click", () => {
+            notice.hidden = true;
+            trigger?.focus();
+        });
+        notice.append(message, yes, no);
+        notice.hidden = false;
+        notice.scrollIntoView({ block: "nearest" });
+        if (trigger) { no.focus({ preventScroll: true }); }
     }
 
     private showError(message: string): void {
@@ -178,10 +198,64 @@ export class DeviceConfigurationForm {
     private appendAclSettings(
         settings: HTMLElement,
         device: Device,
-        saved: Ipv4AclConfiguration | undefined,
-        protocolIndex: number
-    ): () => Ipv4AclConfiguration {
-        const prefix = `protocols.${protocolIndex}.acl`;
+        saved: readonly Ipv4AclConfiguration[]
+    ): () => Ipv4AclConfiguration[] {
+        const cards = document.createElement("div");
+        const readAcls = new Map<HTMLElement, () => Ipv4AclConfiguration>();
+        const add = button("ACL hinzufügen");
+        add.className = "configuration-acl-add";
+
+        const addAcl = (acl?: Ipv4AclConfiguration) => {
+            const card = document.createElement("details");
+            card.className = "configuration-advanced";
+            card.open = acl === undefined || saved.length === 1;
+            const summary = document.createElement("summary");
+            card.append(summary);
+            const remove = button("ACL entfernen");
+            remove.className = "configuration-acl-remove";
+            remove.addEventListener("click", () => {
+                const aclName = name.value.trim();
+                const question = aclName
+                    ? `Möchtest du die ACL „${aclName}“ mit allen Regeln wirklich entfernen?`
+                    : "Möchtest du diese ACL mit allen Regeln wirklich entfernen?";
+                this.showConfirmation(question, "ACL entfernen", "Abbrechen", () => {
+                    readAcls.delete(card);
+                    card.remove();
+                    add.disabled = false;
+                    this.dirty = true;
+                    this.clearValidationErrors();
+                    add.focus();
+                }, remove);
+            });
+            const { name, read } = this.appendAclFields(card, device, acl);
+            const updateTitle = () => { summary.textContent = name.value.trim() || "Neue IPv4-ACL"; };
+            readAcls.set(card, read);
+            updateTitle();
+            name.addEventListener("input", updateTitle);
+            card.append(remove);
+            cards.append(card);
+            add.disabled = readAcls.size >= MAX_IPV4_ACLS;
+            if (!acl) {
+                name.focus();
+            }
+        };
+
+        saved.forEach(addAcl);
+        add.addEventListener("click", () => {
+            if (readAcls.size >= MAX_IPV4_ACLS) { return; }
+            this.dirty = true;
+            this.clearValidationErrors();
+            addAcl();
+        });
+        settings.append(cards, add);
+        return () => Array.from(readAcls.values(), (read) => read());
+    }
+
+    private appendAclFields(
+        settings: HTMLElement,
+        device: Device,
+        saved: Ipv4AclConfiguration | undefined
+    ): { name: HTMLInputElement; read: () => Ipv4AclConfiguration } {
         const name = input("text", saved?.name ?? "", 64);
         const iface = document.createElement("select");
         iface.append(new Option("Ohne Interface-Zuweisung", ""));
@@ -205,7 +279,7 @@ export class DeviceConfigurationForm {
         const rules = document.createElement("div");
         const readRules = new Map<HTMLElement, () => Ipv4AclRule>();
         const add = button("ACL-Regel hinzufügen");
-        add.className = "configuration-secondary";
+        add.className = "configuration-acl-add";
 
         const addRule = (rule?: Ipv4AclRule) => {
             const row = document.createElement("fieldset");
@@ -222,14 +296,16 @@ export class DeviceConfigurationForm {
             source.placeholder = destination.placeholder = "IPv4-Adresse oder any";
             sourceWildcard.placeholder = destinationWildcard.placeholder = "Leer für Einzeladresse oder any";
             const remove = button("Regel entfernen");
-            remove.className = "configuration-secondary";
+            remove.className = "configuration-acl-remove";
             remove.addEventListener("click", () => {
-                readRules.delete(row);
-                row.remove();
-                add.disabled = false;
-                this.dirty = true;
-                this.clearValidationErrors();
-                add.focus();
+                this.showConfirmation("Möchtest du diese ACL-Regel wirklich entfernen?", "Regel entfernen", "Abbrechen", () => {
+                    readRules.delete(row);
+                    row.remove();
+                    add.disabled = false;
+                    this.dirty = true;
+                    this.clearValidationErrors();
+                    add.focus();
+                }, remove);
             });
             row.append(legend, field("Aktion", action), field("Quelle", source),
                 field("Quell-Wildcard", sourceWildcard), field("Ziel", destination),
@@ -255,18 +331,20 @@ export class DeviceConfigurationForm {
             this.clearValidationErrors();
             addRule().focus();
         });
-        settings.append(this.validatedField(`${prefix}.name`, "ACL-Name", name),
-            this.validatedField(`${prefix}.binding.interfaceId`, "Interface (optional)", iface),
+        settings.append(field("ACL-Name", name), field("Interface (optional)", iface),
             field("Richtung", direction), rules, add);
 
-        return () => ({
-            name: name.value.trim(),
-            rules: Array.from(readRules.values(), (read) => read()),
-            binding: iface.value ? {
-                interfaceId: iface.value,
-                direction: direction.value === "out" ? "out" : "in"
-            } : undefined
-        });
+        return {
+            name,
+            read: () => ({
+                name: name.value.trim(),
+                rules: Array.from(readRules.values(), (read) => read()),
+                binding: iface.value ? {
+                    interfaceId: iface.value,
+                    direction: direction.value === "out" ? "out" : "in"
+                } : undefined
+            })
+        };
     }
 
     private open(device: Device, otherHostnames: string[], connectedIds: string[]): void {
@@ -720,7 +798,7 @@ export class DeviceConfigurationForm {
 
             protocols.append(settings);
             const readAcl = type === ProtocolType.Acl
-                ? this.appendAclSettings(settings, device, saved?.acl, protocolIndex)
+                ? this.appendAclSettings(settings, device, saved?.acls ?? [])
                 : undefined;
 
             return {
@@ -785,7 +863,7 @@ export class DeviceConfigurationForm {
                 }) => ({
                     type,
                     enabled: enabled.checked,
-                    ...(readAcl ? { acl: readAcl() } : {}),
+                    ...(readAcl ? { acls: readAcl() } : {}),
 
                     ...(type === ProtocolType.Rip
                         ? {

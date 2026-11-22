@@ -471,7 +471,7 @@ export class TopologyStore implements vscode.Disposable {
                     };
 
                     if (protocol instanceof AclProtocol) {
-                        return { ...base, acl: protocol.configuration };
+                        return { ...base, acls: protocol.configurations };
                     }
 
                     if (protocol instanceof RipProtocol) {

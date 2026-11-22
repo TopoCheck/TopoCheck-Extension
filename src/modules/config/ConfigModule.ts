@@ -49,7 +49,8 @@ export class ConfigModule implements IModule {
                 protocol => protocol instanceof OspfProtocol && protocol.enabled
             );
             const acl = device.protocols.find(
-                (protocol): protocol is AclProtocol => protocol instanceof AclProtocol && protocol.enabled
+                (protocol): protocol is AclProtocol =>
+                    protocol instanceof AclProtocol && protocol.enabled && protocol.configurations.length > 0
             );
 
             if (ripEnabled) {

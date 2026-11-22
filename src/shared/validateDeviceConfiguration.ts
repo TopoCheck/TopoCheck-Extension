@@ -338,8 +338,43 @@ function validateProtocols(
             validateRip(protocol, field, report);
         } else if (protocol.type === ProtocolType.Ospf) {
             validateOspf(protocol, field, report);
-        } else if (protocol.type === ProtocolType.Acl && protocol.acl !== undefined) {
-            validateAcl(device, data, protocol.acl, `${field}.acl`, report);
+        } else if (protocol.type === ProtocolType.Acl) {
+            const acls = protocol.acls ?? (protocol.acl === undefined ? undefined : [protocol.acl]);
+            if (acls !== undefined) {
+                validateAcls(device, data, acls, `${field}.acls`, report);
+            }
+        }
+    });
+}
+
+function validateAcls(
+    device: Device,
+    data: DeviceConfiguration,
+    acls: NonNullable<ProtocolConfiguration["acls"]>,
+    field: string,
+    report: Report
+): void {
+    if (!acls.length) {
+        report(field, "acl-required", "Lege mindestens eine IPv4-ACL an.");
+    }
+    const names = new Set<string>();
+    const bindings = new Set<string>();
+    acls.forEach((acl, index) => {
+        const aclField = `${field}.${index}`;
+        const reportAcl: Report = (path, code, message) => report(path, code, `ACL ${index + 1}: ${message}`);
+        validateAcl(device, data, acl, aclField, reportAcl);
+
+        const name = acl.name.toLowerCase();
+        if (name && names.has(name)) {
+            reportAcl(`${aclField}.name`, "acl-name-duplicate", "Dieser ACL-Name ist bereits vergeben.");
+        }
+        names.add(name);
+        if (acl.binding) {
+            const key = `${acl.binding.interfaceId}:${acl.binding.direction}`;
+            if (bindings.has(key)) {
+                reportAcl(`${aclField}.binding.interfaceId`, "acl-binding-duplicate", "Das Interface ist in dieser Richtung bereits einer ACL zugewiesen.");
+            }
+            bindings.add(key);
         }
     });
 }

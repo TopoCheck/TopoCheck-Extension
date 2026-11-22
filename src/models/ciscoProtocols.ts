@@ -80,9 +80,10 @@ export interface Ipv4AclConfiguration {
 }
 
 export const MAX_IPV4_ACL_RULES = 1024;
+export const MAX_IPV4_ACLS = 64;
 
 export class AclProtocol extends NetworkProtocol {
-  public constructor(id: string, enabled: boolean, public readonly configuration: Ipv4AclConfiguration) {
+  public constructor(id: string, enabled: boolean, public readonly configurations: Ipv4AclConfiguration[]) {
     super({ id, enabled, type: ProtocolType.Acl });
   }
 }
