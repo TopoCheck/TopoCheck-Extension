@@ -3,12 +3,7 @@ import { IModule } from "../../core/interfaces/IModule";
 import { TopologyStore } from "../topology/TopologyStore";
 import { RipConfigGenerator } from "./RipConfigGenerator";
 import { OspfConfigGenerator } from "./OspfConfigGenerator";
-import { AclConfigGenerator } from "./AclConfigGenerator";
-import { NatConfigGenerator } from "./NatConfigGenerator";
 import {
-    AclProtocol,
-    NatProtocol,
-    PatProtocol,
     RipProtocol,
     OspfProtocol
 } from "../../models/ciscoProtocols";
@@ -18,8 +13,6 @@ export class ConfigModule implements IModule {
 
     private readonly ripGenerator = new RipConfigGenerator();
     private readonly ospfGenerator = new OspfConfigGenerator();
-    private readonly aclGenerator = new AclConfigGenerator();
-    private readonly natGenerator = new NatConfigGenerator();
 
     constructor(private readonly store: TopologyStore) { }
 
@@ -41,7 +34,7 @@ export class ConfigModule implements IModule {
                 router.id
             );
 
-            const blocks: string[] = [
+            const configurations: string[] = [
                 `hostname ${device.hostname}`
             ];
 
@@ -52,46 +45,23 @@ export class ConfigModule implements IModule {
             const ospfEnabled = device.protocols.some(
                 protocol => protocol instanceof OspfProtocol && protocol.enabled
             );
-            const acl = device.protocols.find(
-                (protocol): protocol is AclProtocol =>
-                    protocol instanceof AclProtocol && protocol.enabled && protocol.configurations.length > 0
-            );
 
-            const nat = device.protocols.find(
-                (protocol): protocol is NatProtocol => protocol instanceof NatProtocol && protocol.enabled
-            );
-            const pat = device.protocols.find(
-                (protocol): protocol is PatProtocol => protocol instanceof PatProtocol && protocol.enabled
-            );
-            const hasSecurityConfiguration = !!(acl || nat || pat);
-            const routingExit = hasSecurityConfiguration ? "\n exit" : "";
             if (ripEnabled) {
-                blocks.push(this.ripGenerator.generate(device) + routingExit);
+                configurations.push(this.ripGenerator.generate(device));
             }
 
             if (ospfEnabled) {
-                blocks.push(this.ospfGenerator.generate(device) + routingExit);
+                configurations.push(this.ospfGenerator.generate(device));
             }
 
-            const interfaceCommands = new Map<string, string[]>();
-            if (nat) {
-                blocks.push(this.natGenerator.generate(device, nat, interfaceCommands).join("\n"));
-            }
-            if (acl) {
-                blocks.push(...this.aclGenerator.generate(device, acl, interfaceCommands));
-            }
-            if (pat) {
-                blocks.push(this.natGenerator.generatePat(device, pat, interfaceCommands));
-            }
-            for (const [name, commands] of interfaceCommands) {
-                blocks.push([`interface ${name}`, ...commands, " exit"].join("\n"));
-            }
-
-            if (blocks.length === 1) {
+            if (!ripEnabled && !ospfEnabled) {
                 continue;
             }
 
-            const content = [...blocks, "end"].join("\n\n");
+            const content = [
+                ...configurations,
+                "end"
+            ].join("\n");
 
             await this.store.saveGeneratedConfig(
                 topologyId,

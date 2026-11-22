@@ -1,5 +1,4 @@
 import { DeviceType } from "../models/deviceType";
-import type { NatInterfaceRoles } from "../models/ciscoProtocols";
 import { InterfaceType } from "../models/interfaceType";
 import { isValidIpv4Address, isValidSubnetMask } from "../models/ipv4";
 import { compatibleProtocols } from "../models/networkDevice";
@@ -310,7 +309,6 @@ function validateInterfaceAddress(
 // ---------------------------------------------------------------------------
 
 function validateProtocols(
-    device: Device,
     deviceType: DeviceType | undefined,
     data: DeviceConfiguration,
     report: Report
@@ -339,172 +337,8 @@ function validateProtocols(
             validateRip(protocol, field, report);
         } else if (protocol.type === ProtocolType.Ospf) {
             validateOspf(protocol, field, report);
-        } else if (protocol.type === ProtocolType.Acl) {
-            const acls = protocol.acls ?? (protocol.acl === undefined ? undefined : [protocol.acl]);
-            if (acls !== undefined) {
-                validateAcls(device, data, acls, `${field}.acls`, report);
-            }
-        } else if (protocol.type === ProtocolType.Nat && protocol.nat !== undefined) {
-            validateStaticNat(device, data, protocol.nat, `${field}.nat`, report);
-        } else if (protocol.type === ProtocolType.Pat && protocol.pat !== undefined) {
-            validatePat(device, data, protocol.pat, `${field}.pat`, report);
         }
     });
-}
-
-function validateNatRoles(
-    device: Device,
-    data: DeviceConfiguration,
-    roles: NatInterfaceRoles,
-    field: string,
-    report: Report,
-    protocolName: "NAT" | "PAT"
-): void {
-    for (const [key, label] of [
-        ["insideInterfaceId", "Inside"],
-        ["outsideInterfaceId", "Outside"]
-    ] as const) {
-        if (!isLayer3Interface(device, data, roles[key])) {
-            report(`${field}.${key}`, "nat-interface-invalid", `Wähle ein gültiges Layer-3-Interface für ${protocolName} ${label}.`);
-        }
-    }
-    if (roles.insideInterfaceId && roles.insideInterfaceId === roles.outsideInterfaceId) {
-        report(`${field}.outsideInterfaceId`, "nat-interface-duplicate", "Inside und Outside benötigen unterschiedliche Interfaces.");
-    }
-}
-
-function validatePat(
-    device: Device,
-    data: DeviceConfiguration,
-    pat: NonNullable<ProtocolConfiguration["pat"]>,
-    field: string,
-    report: Report
-): void {
-    validateNatRoles(device, data, pat, field, report, "PAT");
-
-    const acl = data.protocols.find((protocol) => protocol.type === ProtocolType.Acl && protocol.enabled);
-    const acls = acl?.acls ?? (acl?.acl ? [acl.acl] : []);
-    if (!pat.aclName || !acls.some(({ name }) => name === pat.aclName)) {
-        report(`${field}.aclName`, "pat-acl-invalid", "Wähle eine vorhandene ACL bei aktiviertem ACL-Protokoll.");
-    }
-
-    const nat = data.protocols.find((protocol) => protocol.type === ProtocolType.Nat && protocol.enabled)?.nat;
-    if (pat.insideInterfaceId && pat.insideInterfaceId === nat?.outsideInterfaceId) {
-        report(`${field}.insideInterfaceId`, "nat-role-conflict", "Dieses Interface ist im statischen NAT bereits als Outside zugewiesen.");
-    }
-    if (pat.outsideInterfaceId && pat.outsideInterfaceId === nat?.insideInterfaceId) {
-        report(`${field}.outsideInterfaceId`, "nat-role-conflict", "Dieses Interface ist im statischen NAT bereits als Inside zugewiesen.");
-    }
-}
-
-function validateStaticNat(
-    device: Device,
-    data: DeviceConfiguration,
-    nat: NonNullable<ProtocolConfiguration["nat"]>,
-    field: string,
-    report: Report
-): void {
-    validateNatRoles(device, data, nat, field, report, "NAT");
-    if (!nat.mappings.length) {
-        report(`${field}.mappings`, "nat-mapping-required", "Füge mindestens eine statische NAT-Zuordnung hinzu.");
-    }
-
-    const localAddresses = new Set<string>();
-    const globalAddresses = new Set<string>();
-    nat.mappings.forEach((mapping, index) => {
-        for (const [key, label, seen] of [
-            ["localAddress", "Interne IP", localAddresses],
-            ["globalAddress", "Übersetzte IP", globalAddresses]
-        ] as const) {
-            const address = mapping[key];
-            const addressField = `${field}.mappings.${index}.${key}`;
-            const firstOctet = Number(address.split(".")[0]);
-            if (!isCanonicalIpv4(address) || firstOctet === 0 || firstOctet === 127 || firstOctet >= 224) {
-                report(addressField, "nat-address-invalid", `NAT-Zuordnung ${index + 1}, ${label}: Gib eine gültige Unicast-IPv4-Adresse ein.`);
-            } else if (seen.has(address)) {
-                report(addressField, "nat-address-duplicate", `NAT-Zuordnung ${index + 1}, ${label}: Diese Adresse ist bereits zugewiesen.`);
-            }
-            seen.add(address);
-        }
-    });
-}
-
-function validateAcls(
-    device: Device,
-    data: DeviceConfiguration,
-    acls: NonNullable<ProtocolConfiguration["acls"]>,
-    field: string,
-    report: Report
-): void {
-    if (!acls.length) {
-        report(field, "acl-required", "Lege mindestens eine IPv4-ACL an.");
-    }
-    const names = new Set<string>();
-    const bindings = new Set<string>();
-    acls.forEach((acl, index) => {
-        const aclField = `${field}.${index}`;
-        const reportAcl: Report = (path, code, message) => report(path, code, `ACL ${index + 1}: ${message}`);
-        validateAcl(device, data, acl, aclField, reportAcl);
-
-        const name = acl.name.toLowerCase();
-        if (name && names.has(name)) {
-            reportAcl(`${aclField}.name`, "acl-name-duplicate", "Dieser ACL-Name ist bereits vergeben.");
-        }
-        names.add(name);
-        if (acl.binding) {
-            const key = `${acl.binding.interfaceId}:${acl.binding.direction}`;
-            if (bindings.has(key)) {
-                reportAcl(`${aclField}.binding.interfaceId`, "acl-binding-duplicate", "Das Interface ist in dieser Richtung bereits einer ACL zugewiesen.");
-            }
-            bindings.add(key);
-        }
-    });
-}
-
-function validateAcl(
-    device: Device,
-    data: DeviceConfiguration,
-    acl: NonNullable<ProtocolConfiguration["acl"]>,
-    field: string,
-    report: Report
-): void {
-    if (acl.name !== acl.name.trim() || !/^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(acl.name)) {
-        report(`${field}.name`, "acl-name-invalid", "Der ACL-Name muss mit einem Buchstaben beginnen und darf Buchstaben, Ziffern, Bindestriche und Unterstriche enthalten.");
-    }
-    if (!acl.rules.length) {
-        report(`${field}.rules`, "acl-rules-required", "Füge mindestens eine ACL-Regel hinzu.");
-    }
-
-    acl.rules.forEach((rule, index) => {
-        const ruleField = `${field}.rules.${index}`;
-        for (const [key, label, wildcard] of [
-            ["source", "Quelle", rule.sourceWildcard],
-            ["destination", "Ziel", rule.destinationWildcard]
-        ] as const) {
-            const address = rule[key];
-            if (address !== "any" && !isCanonicalIpv4(address)) {
-                report(`${ruleField}.${key}`, "acl-address-invalid", `Regel ${index + 1}, ${label}: Gib eine IPv4-Adresse oder „any“ ein.`);
-            }
-            if (wildcard !== "" && (address === "any" || !isCanonicalIpv4(wildcard))) {
-                report(`${ruleField}.${key}Wildcard`, "acl-wildcard-invalid", `Regel ${index + 1}, ${label}: Gib eine gültige IPv4-Wildcard-Maske ein. Bei „any“ bleibt das Feld leer.`);
-            }
-        }
-    });
-
-    if (acl.binding && !isLayer3Interface(device, data, acl.binding.interfaceId)) {
-        report(`${field}.binding.interfaceId`, "acl-interface-invalid", "Wähle ein gültiges Layer-3-Interface dieses Routers.");
-    }
-}
-
-function isLayer3Interface(device: Device, data: DeviceConfiguration, interfaceId: string): boolean {
-    const iface = device.interfaces.find(({ id }) => id === interfaceId);
-    const input = data.interfaces.find(({ id }) => id === interfaceId);
-    return !!iface && (input?.layer ?? iface.layer) !== 2 &&
-        iface.name === iface.name.trim() && /^[A-Za-z][A-Za-z0-9./-]*$/.test(iface.name);
-}
-
-function isCanonicalIpv4(value: string): boolean {
-    return value === value.trim() && isValidIpv4Address(value) && !hasLeadingZeros(value);
 }
 
 function validateRip(protocol: ProtocolConfiguration, field: string, report: Report): void {
@@ -638,7 +472,7 @@ export function validateDeviceConfiguration(
     const deviceType = validateDeviceModel(device, report);
     validateGeneral(data, otherHostnames, report);
     validateInterfaces(device, data, report);
-    validateProtocols(device, deviceType, data, report);
+    validateProtocols(deviceType, data, report);
 
     return errors;
 }

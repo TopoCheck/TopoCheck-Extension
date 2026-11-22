@@ -7,8 +7,7 @@ import { ProtocolType } from "../models/protocolType";
 import type { Device } from "../modules/topology/models";
 import { DeviceConfigurationValidationError, validateDeviceConfiguration } from "./validateDeviceConfiguration";
 import type { DeviceAccessConfiguration } from "../models/deviceAccessConfiguration";
-import { AclProtocol, Ipv4AclConfiguration, MAX_IPV4_ACLS, MAX_IPV4_ACL_RULES, RipProtocol, OspfProtocol } from "../models/ciscoProtocols";
-import { MAX_STATIC_NAT_MAPPINGS, NatProtocol, PatConfiguration, PatProtocol, StaticNatConfiguration } from "../models/ciscoProtocols";
+import { RipProtocol, OspfProtocol } from "../models/ciscoProtocols";
 
 export interface DeviceConfiguration extends DeviceAccessConfiguration {
     label?: string;
@@ -24,10 +23,6 @@ export interface DeviceConfiguration extends DeviceAccessConfiguration {
     protocols: {
         type: ProtocolType;
         enabled: boolean;
-        acl?: Ipv4AclConfiguration;
-        acls?: Ipv4AclConfiguration[];
-        nat?: StaticNatConfiguration;
-        pat?: PatConfiguration;
         rip?: {
             version: 1 | 2;
             noAutoSummary: boolean;
@@ -50,55 +45,6 @@ export interface DeviceConfiguration extends DeviceAccessConfiguration {
 }
 
 export { compatibleProtocols };
-
-function hasNatInterfaceRoles(value: Record<string, unknown>): boolean {
-    const { insideInterfaceId, outsideInterfaceId } = value;
-    return typeof insideInterfaceId === "string" && insideInterfaceId.length <= 128 &&
-        typeof outsideInterfaceId === "string" && outsideInterfaceId.length <= 128;
-}
-
-function isPatConfiguration(value: unknown): boolean {
-    if (!value || typeof value !== "object") { return false; }
-    const configuration = value as Record<string, unknown>;
-    return hasNatInterfaceRoles(configuration) &&
-        typeof configuration.aclName === "string" && configuration.aclName.length <= 64;
-}
-
-function isStaticNatConfiguration(value: unknown): boolean {
-    if (!value || typeof value !== "object") { return false; }
-    const configuration = value as Record<string, unknown>;
-    const { mappings } = configuration;
-    return hasNatInterfaceRoles(configuration) &&
-        Array.isArray(mappings) && mappings.length <= MAX_STATIC_NAT_MAPPINGS &&
-        mappings.every((mapping: unknown) => {
-            if (!mapping || typeof mapping !== "object") { return false; }
-            const { localAddress, globalAddress } = mapping as Record<string, unknown>;
-            return typeof localAddress === "string" && localAddress.length <= 15 &&
-                typeof globalAddress === "string" && globalAddress.length <= 15;
-        });
-}
-
-function isAclConfiguration(value: unknown): boolean {
-    if (!value || typeof value !== "object") { return false; }
-    const { name, rules, binding } = value as Record<string, unknown>;
-    if (typeof name !== "string" || name.length > 64 ||
-        !Array.isArray(rules) || rules.length > MAX_IPV4_ACL_RULES) { return false; }
-
-    if (binding !== undefined) {
-        if (!binding || typeof binding !== "object") { return false; }
-        const { interfaceId, direction } = binding as Record<string, unknown>;
-        if (typeof interfaceId !== "string" || interfaceId.length > 128 ||
-            (direction !== "in" && direction !== "out")) { return false; }
-    }
-
-    return rules.every((entry: unknown) => {
-        if (!entry || typeof entry !== "object") { return false; }
-        const { action, source, sourceWildcard, destination, destinationWildcard } = entry as Record<string, unknown>;
-        return (action === "permit" || action === "deny") &&
-            [source, sourceWildcard, destination, destinationWildcard]
-                .every((part) => typeof part === "string" && part.length <= 15);
-    });
-}
 
 function isRipConfiguration(value: unknown): boolean {
     if (!value || typeof value !== "object") { return false; }
@@ -183,11 +129,6 @@ export function isDeviceConfiguration(value: unknown): value is DeviceConfigurat
                 typeof protocol.enabled === "boolean" &&
                 (protocol.rip === undefined || isRipConfiguration(protocol.rip)) &&
                 (protocol.ospf === undefined || isOspfConfiguration(protocol.ospf)) &&
-                (protocol.nat === undefined || (protocol.type === ProtocolType.Nat && isStaticNatConfiguration(protocol.nat))) &&
-                (protocol.pat === undefined || (protocol.type === ProtocolType.Pat && isPatConfiguration(protocol.pat))) &&
-                (protocol.acl === undefined || (protocol.type === ProtocolType.Acl && isAclConfiguration(protocol.acl))) &&
-                (protocol.acls === undefined || (protocol.type === ProtocolType.Acl && protocol.acl === undefined &&
-                    Array.isArray(protocol.acls) && protocol.acls.length <= MAX_IPV4_ACLS && protocol.acls.every(isAclConfiguration))) &&
                 (protocol.type === ProtocolType.Rip
                     ? protocol.ospf === undefined
                     : protocol.rip === undefined) &&
@@ -214,18 +155,6 @@ export function configurationOf(device: Device, connectedInterfaceIds: readonly 
                 type: protocol.type,
                 enabled: protocol.enabled
             };
-
-            if (protocol.acls !== undefined) {
-                result.acls = structuredClone(protocol.acls);
-            } else if (protocol.acl !== undefined) {
-                result.acls = [structuredClone(protocol.acl)];
-            }
-            if (protocol.nat !== undefined) {
-                result.nat = structuredClone(protocol.nat);
-            }
-            if (protocol.pat !== undefined) {
-                result.pat = { ...protocol.pat };
-            }
 
             if (protocol.rip !== undefined) {
                 result.rip = {
@@ -296,14 +225,7 @@ export function buildConfiguredDevice(device: Device, data: DeviceConfiguration,
             (item) => item.type === protocol.type
         )?.id ?? `${device.id}:${protocol.type}`;
 
-        const acls = protocol.acls ?? (protocol.acl === undefined ? undefined : [protocol.acl]);
-        if (protocol.type === ProtocolType.Acl && acls !== undefined) {
-            model.addProtocol(new AclProtocol(id, protocol.enabled, structuredClone(acls)));
-        } else if (protocol.type === ProtocolType.Nat && protocol.nat !== undefined) {
-            model.addProtocol(new NatProtocol(id, protocol.enabled, structuredClone(protocol.nat)));
-        } else if (protocol.type === ProtocolType.Pat && protocol.pat !== undefined) {
-            model.addProtocol(new PatProtocol(id, protocol.enabled, { ...protocol.pat }));
-        } else if (protocol.type === ProtocolType.Rip) {
+        if (protocol.type === ProtocolType.Rip) {
             const rip = new RipProtocol(id);
             if (protocol.rip !== undefined) {
                 rip.version = protocol.rip.version ?? 2;

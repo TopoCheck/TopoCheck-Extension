@@ -8,7 +8,6 @@ import type { Point } from "../../shared/geometry";
 import type { ProtocolType } from "../../models/protocolType";
 import type { InterfaceType } from "../../models/interfaceType";
 import type { DeviceAccessConfiguration } from "../../models/deviceAccessConfiguration";
-import type { Ipv4AclConfiguration, PatConfiguration, StaticNatConfiguration } from "../../models/ciscoProtocols";
 
 export type DeviceType = "router" | "switch" | "pc";
 export type InterfaceStatus = "up" | "down";
@@ -71,10 +70,6 @@ export interface DeviceProtocol {
     enabled: boolean;
     rip?: TopologyRipConfiguration;
     ospf?: TopologyOspfConfiguration;
-    acl?: Ipv4AclConfiguration;
-    acls?: Ipv4AclConfiguration[];
-    nat?: StaticNatConfiguration;
-    pat?: PatConfiguration;
 }
 
 export interface Device extends DeviceAccessConfiguration {
