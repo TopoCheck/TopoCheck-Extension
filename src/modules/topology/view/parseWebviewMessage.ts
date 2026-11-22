@@ -43,12 +43,18 @@ export function parseWebviewMessage(raw: unknown): WebviewToExtensionMessage | u
     switch (message.type) {
         case "configureDevice":
             if (isId(message.deviceId) && isDeviceConfiguration(message.configuration)) {
-                return { type: "configureDevice", deviceId: message.deviceId,
-                    configuration: message.configuration };
+                return {
+                    type: "configureDevice", deviceId: message.deviceId,
+                    configuration: message.configuration
+                };
             }
             return undefined;
         case "ready":
             return { type: "ready" };
+
+        case "submitTopology":
+            return message.mode === "generate" || message.mode === "write"
+                ? { type: "submitTopology", mode: message.mode } : undefined;
 
         case "addDevice":
             if (isDeviceType(message.deviceType) && isFinitePoint(message.position)) {
@@ -85,7 +91,7 @@ export function parseWebviewMessage(raw: unknown): WebviewToExtensionMessage | u
             }
             return undefined;
 
-        
+
         case "addConnection":
             if (
                 isId(message.interfaceAId) &&

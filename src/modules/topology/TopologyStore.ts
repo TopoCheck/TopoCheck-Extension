@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { isProtocolComplete } from "../../shared/switchingSettings";
 import { randomUUID } from "crypto";
 import { isFinitePoint, roundPoint } from "../../shared/geometry";
 import { isHostnameTaken, nextHostname, validateHostname } from "./hostname";
@@ -203,18 +204,18 @@ export class TopologyStore implements vscode.Disposable {
                 ? this.normalizePosition(input.position)
                 : findFreeGridPosition(Object.values(topology.layout.devices));
 
-            
-const deviceId = randomUUID();
 
-const interfaceNames =
-    input.type === "router"
-        ? ["GigabitEthernet0/0", "GigabitEthernet0/1"]
-        : input.type === "switch"
-          ? Array.from(
-                { length: 8 },
-                (_, index) => `FastEthernet0/${index + 1}`
-            )
-          : ["eth0"];
+            const deviceId = randomUUID();
+
+            const interfaceNames =
+                input.type === "router"
+                    ? ["GigabitEthernet0/0", "GigabitEthernet0/1"]
+                    : input.type === "switch"
+                        ? Array.from(
+                            { length: 8 },
+                            (_, index) => `FastEthernet0/${index + 1}`
+                        )
+                        : ["eth0"];
 
             const newDevice: Device = {
                 id: deviceId,
@@ -374,14 +375,24 @@ const interfaceNames =
                 vtyPassword: model.vtyPassword, banner: model.banner,
                 interfaces: device.interfaces.map((iface) => {
                     const configured = model.findInterface(iface.id)!;
-                    return { ...iface, type: configured.type, enabled: configured.enabled,
+                    const input = configuration.interfaces.find((item) => item.id === iface.id);
+                    return {
+                        ...iface, type: configured.type, enabled: configured.enabled,
                         ipAddress: configured.ipAddress, subnetMask: configured.subnetMask,
-                        description: configured.description, layer: configured.layer };
+                        description: configured.description, layer: configured.layer,
+                        accessVlan: input?.accessVlan, portMode: input?.portMode
+                    };
                 }),
-                protocols: model.protocols.map(({ id, type, enabled }) => ({ id, type, enabled }))
+                // Ein unvollständiges Protokoll bleibt gespeichert, wird aber nie als aktiviert übernommen.
+                protocols: model.protocols.map(({ id, type, enabled }) => {
+                    const settings = configuration.protocols.find((item) => item.type === type)?.settings;
+                    return { id, type, enabled: enabled && isProtocolComplete(type, settings), ...(settings ? { settings } : {}) };
+                })
             };
-            const candidate: Topology = { ...topology,
-                devices: topology.devices.map((item) => item.id === deviceId ? replacement : item) };
+            const candidate: Topology = {
+                ...topology,
+                devices: topology.devices.map((item) => item.id === deviceId ? replacement : item)
+            };
             await this.persist(candidate);
             this.fireChange({ type: TopologyChangeType.DeviceConfigUpdated, topologyId, deviceId });
         });
@@ -581,11 +592,11 @@ const interfaceNames =
                 device.type === "router"
                     ? ["GigabitEthernet0/0", "GigabitEthernet0/1"]
                     : device.type === "switch"
-                    ? Array.from(
+                        ? Array.from(
                             { length: 8 },
                             (_, index) => `FastEthernet0/${index + 1}`
                         )
-                    : ["eth0"];
+                        : ["eth0"];
 
             device.interfaces = names.map((name) => ({
                 id: randomUUID(),

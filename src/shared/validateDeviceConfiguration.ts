@@ -6,6 +6,7 @@ import { ProtocolType } from "../models/protocolType";
 import { isHostnameTaken, validateHostname } from "../modules/topology/hostname";
 import type { Device } from "../modules/topology/models";
 import type { DeviceConfiguration } from "./deviceConfiguration";
+import { RESERVED_VLAN_IDS, VLAN_NAME_PATTERN } from "./switchingSettings";
 
 export interface ConfigurationFieldError {
     /** Indexed field paths, e.g. interfaces.0.ipAddress; suitable for any UI. */
@@ -116,5 +117,49 @@ export function validateDeviceConfiguration(device: Device | undefined, data: De
         if (protocols.has(protocol.type)) { add(field, "protocol-duplicate", "Ein Protokoll darf nur einmal ausgewählt werden."); }
         protocols.add(protocol.type);
     });
+    validateSwitching(device, data, add);
     return errors;
+}
+
+/** H3b: VLAN-Liste, Native VLAN und Port-Zuordnung eines Switches. */
+function validateSwitching(device: Device, data: DeviceConfiguration,
+    add: (field: string, code: string, message: string) => void): void {
+    const isSwitch = device.type === DeviceType.Switch;
+    if (data.protocols.some((p) => p.type === ProtocolType.Stp) && data.protocols.some((p) => p.type === ProtocolType.Rstp)) {
+        add("protocols", "stp-mode-conflict", "Bitte entweder STP oder RSTP auswählen – ein Switch läuft immer nur in einem Modus.");
+    }
+
+    const vlanIndex = data.protocols.findIndex((p) => p.type === ProtocolType.Vlan);
+    const vlanSettings = vlanIndex >= 0 ? data.protocols[vlanIndex].settings : undefined;
+    const defined = new Set<number>();
+    vlanSettings?.vlans?.forEach((vlan, index) => {
+        const field = `protocols.${vlanIndex}.vlans.${index}`;
+        if (vlan.id < 2 || vlan.id > 4094 || RESERVED_VLAN_IDS.includes(vlan.id)) {
+            add(`${field}.id`, "vlan-id-invalid", `VLAN ${vlan.id}: erlaubt sind 2–4094 ohne 999 und 1002–1005.`);
+        } else if (defined.has(vlan.id)) {
+            add(`${field}.id`, "vlan-id-duplicate", `VLAN ${vlan.id} ist doppelt eingetragen.`);
+        }
+        defined.add(vlan.id);
+        if (!VLAN_NAME_PATTERN.test(vlan.name)) {
+            add(`${field}.name`, "vlan-name-invalid", `VLAN ${vlan.id}: Name mit 1–32 Zeichen (Buchstaben, Ziffern, _ oder -).`);
+        }
+    });
+    const native = vlanSettings?.nativeVlan;
+    if (native !== undefined && (native < 1 || native > 4094 || native === 999 || (native >= 1002 && native <= 1005))) {
+        add(`protocols.${vlanIndex}.nativeVlan`, "native-vlan-invalid", "Native VLAN: erlaubt sind 1–4094 ohne 999 und 1002–1005.");
+    }
+
+    data.interfaces.forEach((iface, index) => {
+        const field = `interfaces.${index}`;
+        if (!isSwitch) {
+            if (iface.accessVlan !== undefined || (iface.portMode !== undefined && iface.portMode !== "auto")) {
+                add(`${field}.accessVlan`, "switchport-not-switch", "VLAN-Zuordnungen sind nur auf Switch-Ports möglich.");
+            }
+            return;
+        }
+        // Native VLAN zählt nicht: Endgeräte darin wären ungetaggt auf jedem Trunk erreichbar.
+        if (iface.accessVlan !== undefined && iface.accessVlan !== 1 && !defined.has(iface.accessVlan)) {
+            add(`${field}.accessVlan`, "access-vlan-unknown", `VLAN ${iface.accessVlan} ist im VLAN-Protokoll dieses Switches nicht angelegt.`);
+        }
+    });
 }

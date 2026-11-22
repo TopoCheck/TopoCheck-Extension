@@ -5,6 +5,7 @@ import type { SwitchingOptions, SwitchingTopologyInput, SwitchingWarning } from 
 export * from "./types";
 export { planSwitching } from "./planSwitching";
 export { renderSwitchIos, formatVlanList } from "./renderSwitchIos";
+export { switchingInputFromTopology } from "./fromTopology";
 
 export interface GeneratedSwitchConfig {
     deviceId: string;

@@ -3,13 +3,13 @@ import { DeviceType } from "../../models/deviceType";
 import { InterfaceType } from "../../models/interfaceType";
 import { ProtocolType } from "../../models/protocolType";
 import {
-  formatVlanList,
-  generateSwitchingConfigurations,
-  planSwitching,
-  renderSwitchIos,
-  SwitchingDeviceInput,
-  SwitchingTopologyInput,
-  SwitchPlan
+    formatVlanList,
+    generateSwitchingConfigurations,
+    planSwitching,
+    renderSwitchIos,
+    SwitchingDeviceInput,
+    SwitchingTopologyInput,
+    SwitchPlan
 } from "../../generator/switching";
 import type { NetworkInterface } from "../../models/networkInterface";
 import { parseCiscoConfig } from "../../parser";
@@ -282,5 +282,44 @@ suite("H3b Switching-Generator – Cisco-IOS-Ausgabe", () => {
             assert.deepStrictEqual(parsed.switchport, planned.switchport, planned.name);
             assert.strictEqual(parsed.enabled, !planned.shutdown, planned.name);
         }
+    });
+});
+
+suite("H3b Switching-Generator – Benutzervorgaben", () => {
+    test("manuell gesetzte Primary Root hat Vorrang vor der automatischen Wahl", () => {
+        const input = demoTopology();
+        input.devices[3].rootRole = "primary"; // SW3
+        const plan = planSwitching(input);
+        assert.strictEqual(sw(plan, "SW3").stp.rootRole, "primary");
+        assert.strictEqual(sw(plan, "SW1").stp.rootRole, "secondary", "SW1 bleibt bester automatischer Kandidat");
+        assert.strictEqual(sw(plan, "SW2").stp.rootRole, "none");
+    });
+
+    test("\"Keine Root\" wird bei der automatischen Wahl übersprungen", () => {
+        const input = demoTopology();
+        input.devices[1].rootRole = "none"; // SW1
+        const plan = planSwitching(input);
+        assert.strictEqual(sw(plan, "SW1").stp.rootRole, "none");
+        assert.strictEqual(sw(plan, "SW2").stp.rootRole, "primary");
+    });
+
+    test("mehrere Primary Roots erzeugen eine Warnung", () => {
+        const input = demoTopology();
+        input.devices[1].rootRole = "primary";
+        input.devices[2].rootRole = "primary";
+        assert.ok(planSwitching(input).warnings.some((w) => w.code === "STP_MULTIPLE_PRIMARY"));
+    });
+
+    test("LACP-Modus wird je Seite übernommen; passive/passive erzeugt eine Warnung", () => {
+        const input = demoTopology();
+        input.devices[2].lacpMode = "passive"; // SW2
+        let plan = planSwitching(input);
+        assert.ok(renderSwitchIos(sw(plan, "SW1")).includes("channel-group 1 mode active"));
+        assert.ok(renderSwitchIos(sw(plan, "SW2")).includes("channel-group 1 mode passive"));
+        assert.ok(!plan.warnings.some((w) => w.code === "ETHERCHANNEL_BOTH_PASSIVE"));
+
+        input.devices[1].lacpMode = "passive";
+        plan = planSwitching(input);
+        assert.ok(plan.warnings.some((w) => w.code === "ETHERCHANNEL_BOTH_PASSIVE"));
     });
 });

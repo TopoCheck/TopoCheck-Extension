@@ -39,7 +39,13 @@ export interface SwitchingDeviceInput {
     type: DeviceType;
     protocols: ProtocolType[];
     interfaces: SwitchingInterfaceInput[];
+    /** Vom Benutzer festgelegte Root-Rolle; "auto" bzw. undefined = Generator wählt. */
+    rootRole?: "auto" | "primary" | "secondary" | "none";
+    /** LACP-Modus dieses Switches für alle seine EtherChannels. Standard: active. */
+    lacpMode?: LacpMode;
 }
+
+export type LacpMode = "active" | "passive";
 
 export interface SwitchingConnectionInput {
     id: string;
@@ -83,6 +89,7 @@ export interface PortPlan {
     switchport?: SwitchportConfiguration;
     nonegotiate: boolean;
     channelGroup?: number;
+    channelMode?: LacpMode;
     portfast: boolean;
     bpduGuard: boolean;
     shutdown: boolean;
@@ -93,7 +100,7 @@ export interface PortChannelPlan {
     peerDeviceId: string;
     peerHostname: string;
     memberInterfaceIds: string[];
-    lacpMode: "active";
+    lacpMode: LacpMode;
     switchport?: SwitchportConfiguration;
     nonegotiate: boolean;
 }
@@ -132,6 +139,10 @@ export type SwitchingWarningCode =
     | "ACCESS_BETWEEN_SWITCHES"
     | "STP_DEFAULTED"
     | "STP_MODE_MIXED"
+    | "STP_MULTIPLE_PRIMARY"
+    | "VLAN_NAME_CONFLICT"
+    | "NATIVE_VLAN_MISMATCH"
+    | "ETHERCHANNEL_BOTH_PASSIVE"
     | "ETHERCHANNEL_TYPE_MISMATCH"
     | "ETHERCHANNEL_TOO_MANY_LINKS"
     | "ETHERCHANNEL_DISABLED_ON_PEER";

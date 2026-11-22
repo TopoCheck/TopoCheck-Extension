@@ -8,6 +8,7 @@ import { installIconSprite } from "./icons";
 import { Minimap } from "./minimap";
 import { vscodeApi } from "./vscodeApi";
 import { DeviceConfigurationForm } from "./deviceConfigurationForm";
+import { SubmitTopologyMenu } from "./submitTopology";
 
 function main(): void {
     const root = document.getElementById("app");
@@ -18,7 +19,11 @@ function main(): void {
 
     installIconSprite();
     const editor = new TopologyEditor(root, topologyId);
-    const configurationForm = new DeviceConfigurationForm(root);
+    const configurationForm = new DeviceConfigurationForm(root, {
+        initialWidth: editor.persistedState.configurationWidth,
+        saveWidth: (width) => editor.savePersistedState({ configurationWidth: width })
+    });
+    const submitMenu = new SubmitTopologyMenu(root);
     new Minimap(editor, editor.corner);
 
     editor.savePersistedState({ topologyId });
@@ -26,6 +31,7 @@ function main(): void {
     window.addEventListener("message", (event: MessageEvent<ExtensionToWebviewMessage>) => {
         editor.receive(event.data);
         configurationForm.receive(event.data);
+        submitMenu.receive(event.data);
     });
     vscodeApi.postMessage({ type: "ready" });
 }

@@ -51,7 +51,7 @@ function renderPort(port: PortPlan): string[] {
     }
     lines.push(...renderSwitchport(port.switchport, port.nonegotiate));
     if (port.channelGroup !== undefined) {
-        lines.push(` channel-group ${port.channelGroup} mode active`);
+        lines.push(` channel-group ${port.channelGroup} mode ${port.channelMode ?? "active"}`);
     }
     if (port.portfast) {
         lines.push(" spanning-tree portfast");

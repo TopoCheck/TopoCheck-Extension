@@ -18,6 +18,7 @@ import { isHostnameTaken, validateHostname } from "../hostname";
 import { Topology } from "../models";
 import { TopologyChangeType, TopologyStore } from "../TopologyStore";
 import { parseWebviewMessage } from "./parseWebviewMessage";
+import { submitTopology } from "../../config/topologySubmission";
 import { ConfigurationFieldError, DeviceConfigurationValidationError } from "../../../shared/validateDeviceConfiguration";
 
 export class TopologyViewPanel implements vscode.Disposable {
@@ -197,10 +198,12 @@ export class TopologyViewPanel implements vscode.Disposable {
         if (!device) {
             return;
         }
-        await this.panel.webview.postMessage({ type: "editDevice", device,
+        await this.panel.webview.postMessage({
+            type: "editDevice", device,
             connectedInterfaceIds: topology.connections.flatMap((connection) => [connection.interfaceAId, connection.interfaceBId]),
             otherHostnames: topology.devices.filter((item) => item.id !== deviceId)
-                .map((item) => item.hostname) } satisfies ExtensionToWebviewMessage);
+                .map((item) => item.hostname)
+        } satisfies ExtensionToWebviewMessage);
     }
 
     // Kommunikation
@@ -234,12 +237,17 @@ export class TopologyViewPanel implements vscode.Disposable {
                     error = cause instanceof Error ? cause.message : String(cause);
                     if (cause instanceof DeviceConfigurationValidationError) { validationErrors = cause.errors; }
                 }
-                await this.panel.webview.postMessage({ type: "configurationResult",
-                    deviceId: message.deviceId, error, validationErrors } satisfies ExtensionToWebviewMessage);
+                await this.panel.webview.postMessage({
+                    type: "configurationResult",
+                    deviceId: message.deviceId, error, validationErrors
+                } satisfies ExtensionToWebviewMessage);
                 return;
             }
             case "ready":
                 await this.postState();
+                return;
+            case "submitTopology":
+                await submitTopology(this.store, this.topologyId, message.mode);
                 return;
             case "addDevice":
                 await this.store.addDevice(this.topologyId, {
@@ -259,7 +267,7 @@ export class TopologyViewPanel implements vscode.Disposable {
             case "openDevice":
                 await this.openDevice(message.deviceId);
                 return;
-            
+
             case "addConnection":
                 await this.store.addConnection(
                     this.topologyId,

@@ -8,6 +8,7 @@ import { ProtocolType } from "../../models/protocolType";
 import {
     DEFAULT_NATIVE_VLAN,
     DEFAULT_SWITCHING_OPTIONS,
+    LacpMode,
     PortChannelPlan,
     PortPlan,
     StpMode,
@@ -353,11 +354,22 @@ function planEtherChannels(
             });
         }
 
+        const modeA = a.lacpMode ?? "active";
+        const modeB = b.lacpMode ?? "active";
+        // Die Benutzerwahl wird übernommen, aber passive/passive handelt nie einen Channel aus.
+        if (modeA === "passive" && modeB === "passive") {
+            ctx.warnings.push({
+                code: "ETHERCHANNEL_BOTH_PASSIVE",
+                message: `${a.hostname} und ${b.hostname} sind beide LACP passive – der EtherChannel kommt nicht zustande. Mindestens eine Seite muss active sein.`,
+                deviceId: a.id
+            });
+        }
+
         const planA = plans.get(a.id)!;
         const planB = plans.get(b.id)!;
         const number = nextFreeChannel(planA, planB);
-        planA.portChannels.push(buildChannel(number, b, members.map((link) => link.local)));
-        planB.portChannels.push(buildChannel(number, a, members.map((link) => link.remote)));
+        planA.portChannels.push(buildChannel(number, b, members.map((link) => link.local), modeA));
+        planB.portChannels.push(buildChannel(number, a, members.map((link) => link.remote), modeB));
     }
 }
 
@@ -370,10 +382,11 @@ function nextFreeChannel(a: SwitchPlan, b: SwitchPlan): number {
     return number;
 }
 
-function buildChannel(number: number, peer: SwitchingDeviceInput, members: PortPlan[]): PortChannelPlan {
+function buildChannel(number: number, peer: SwitchingDeviceInput, members: PortPlan[], mode: LacpMode): PortChannelPlan {
     for (const port of members) {
         port.role = "channel-member";
         port.channelGroup = number;
+        port.channelMode = mode;
         port.description = `Po${number} member - ${port.description ?? ""}`.trim();
     }
     const template = members[0];
@@ -382,7 +395,7 @@ function buildChannel(number: number, peer: SwitchingDeviceInput, members: PortP
         peerDeviceId: peer.id,
         peerHostname: peer.hostname,
         memberInterfaceIds: members.map((port) => port.interfaceId),
-        lacpMode: "active",
+        lacpMode: mode,
         switchport: template.switchport,
         nonegotiate: template.nonegotiate
     };
@@ -429,20 +442,35 @@ function planSpanningTree(
                 message: `Unterschiedliche STP-Modi in einer Domäne (${component.map((d) => d.hostname).join(", ")}) – funktioniert, konvergiert aber langsamer.`
             });
         }
-        if (component.length < 2) {
-            continue;
-        }
+        const role = (device: SwitchingDeviceInput) => device.rootRole ?? "auto";
         const ranked = [...component].sort((x, y) =>
             Number(routerAttached.has(y.id)) - Number(routerAttached.has(x.id)) ||
             switchNeighbors.get(y.id)!.size - switchNeighbors.get(x.id)!.size ||
             naturalCompare(x.hostname, y.hostname));
+        // Automatisch gewählt wird nur, wenn es Redundanz gibt; "none" wird nie gewählt.
+        const candidates = component.length > 1 ? ranked.filter((device) => role(device) === "auto") : [];
 
-        const primary = plans.get(ranked[0].id)!;
-        primary.stp.rootRole = "primary";
-        primary.stp.priority = ctx.options.primaryRootPriority;
-        const secondary = plans.get(ranked[1].id)!;
-        secondary.stp.rootRole = "secondary";
-        secondary.stp.priority = ctx.options.secondaryRootPriority;
+        const explicitPrimary = ranked.filter((device) => role(device) === "primary");
+        const primaries = explicitPrimary.length ? explicitPrimary : candidates.slice(0, 1);
+        const explicitSecondary = ranked.filter((device) => role(device) === "secondary");
+        const secondaries = explicitSecondary.length
+            ? explicitSecondary
+            : candidates.filter((device) => !primaries.includes(device)).slice(0, 1);
+
+        if (explicitPrimary.length > 1) {
+            ctx.warnings.push({
+                code: "STP_MULTIPLE_PRIMARY",
+                message: `Mehrere Primary Roots (${explicitPrimary.map((d) => d.hostname).join(", ")}) – bei gleicher Priority entscheidet die niedrigste MAC-Adresse.`
+            });
+        }
+        for (const device of primaries) {
+            plans.get(device.id)!.stp.rootRole = "primary";
+            plans.get(device.id)!.stp.priority = ctx.options.primaryRootPriority;
+        }
+        for (const device of secondaries) {
+            plans.get(device.id)!.stp.rootRole = "secondary";
+            plans.get(device.id)!.stp.priority = ctx.options.secondaryRootPriority;
+        }
     }
 }
 
