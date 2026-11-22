@@ -88,6 +88,25 @@ export class AclProtocol extends NetworkProtocol {
   }
 }
 
+export interface StaticNatMapping {
+  localAddress: string;
+  globalAddress: string;
+}
+
+export interface StaticNatConfiguration {
+  insideInterfaceId: string;
+  outsideInterfaceId: string;
+  mappings: StaticNatMapping[];
+}
+
+export const MAX_STATIC_NAT_MAPPINGS = 1024;
+
+export class NatProtocol extends NetworkProtocol {
+  public constructor(id: string, enabled: boolean, public readonly configuration: StaticNatConfiguration) {
+    super({ id, enabled, type: ProtocolType.Nat });
+  }
+}
+
 export interface SwitchportConfiguration {
   mode?: "access" | "trunk";
   accessVlan?: number;

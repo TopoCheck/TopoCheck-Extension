@@ -343,6 +343,50 @@ function validateProtocols(
             if (acls !== undefined) {
                 validateAcls(device, data, acls, `${field}.acls`, report);
             }
+        } else if (protocol.type === ProtocolType.Nat && protocol.nat !== undefined) {
+            validateStaticNat(device, data, protocol.nat, `${field}.nat`, report);
+        }
+    });
+}
+
+function validateStaticNat(
+    device: Device,
+    data: DeviceConfiguration,
+    nat: NonNullable<ProtocolConfiguration["nat"]>,
+    field: string,
+    report: Report
+): void {
+    for (const [key, label] of [
+        ["insideInterfaceId", "Inside"],
+        ["outsideInterfaceId", "Outside"]
+    ] as const) {
+        if (!isLayer3Interface(device, data, nat[key])) {
+            report(`${field}.${key}`, "nat-interface-invalid", `Wähle ein gültiges Layer-3-Interface für NAT ${label}.`);
+        }
+    }
+    if (nat.insideInterfaceId && nat.insideInterfaceId === nat.outsideInterfaceId) {
+        report(`${field}.outsideInterfaceId`, "nat-interface-duplicate", "Inside und Outside benötigen unterschiedliche Interfaces.");
+    }
+    if (!nat.mappings.length) {
+        report(`${field}.mappings`, "nat-mapping-required", "Füge mindestens eine statische NAT-Zuordnung hinzu.");
+    }
+
+    const localAddresses = new Set<string>();
+    const globalAddresses = new Set<string>();
+    nat.mappings.forEach((mapping, index) => {
+        for (const [key, label, seen] of [
+            ["localAddress", "Interne IP", localAddresses],
+            ["globalAddress", "Übersetzte IP", globalAddresses]
+        ] as const) {
+            const address = mapping[key];
+            const addressField = `${field}.mappings.${index}.${key}`;
+            const firstOctet = Number(address.split(".")[0]);
+            if (!isCanonicalIpv4(address) || firstOctet === 0 || firstOctet === 127 || firstOctet >= 224) {
+                report(addressField, "nat-address-invalid", `NAT-Zuordnung ${index + 1}, ${label}: Gib eine gültige Unicast-IPv4-Adresse ein.`);
+            } else if (seen.has(address)) {
+                report(addressField, "nat-address-duplicate", `NAT-Zuordnung ${index + 1}, ${label}: Diese Adresse ist bereits zugewiesen.`);
+            }
+            seen.add(address);
         }
     });
 }
@@ -400,26 +444,28 @@ function validateAcl(
             ["destination", "Ziel", rule.destinationWildcard]
         ] as const) {
             const address = rule[key];
-            if (address !== "any" && !isAclIpv4(address)) {
+            if (address !== "any" && !isCanonicalIpv4(address)) {
                 report(`${ruleField}.${key}`, "acl-address-invalid", `Regel ${index + 1}, ${label}: Gib eine IPv4-Adresse oder „any“ ein.`);
             }
-            if (wildcard !== "" && (address === "any" || !isAclIpv4(wildcard))) {
+            if (wildcard !== "" && (address === "any" || !isCanonicalIpv4(wildcard))) {
                 report(`${ruleField}.${key}Wildcard`, "acl-wildcard-invalid", `Regel ${index + 1}, ${label}: Gib eine gültige IPv4-Wildcard-Maske ein. Bei „any“ bleibt das Feld leer.`);
             }
         }
     });
 
-    if (acl.binding) {
-        const iface = device.interfaces.find(({ id }) => id === acl.binding?.interfaceId);
-        const input = data.interfaces.find(({ id }) => id === acl.binding?.interfaceId);
-        if (!iface || (input?.layer ?? iface.layer) === 2 ||
-            iface.name !== iface.name.trim() || !/^[A-Za-z][A-Za-z0-9./-]*$/.test(iface.name)) {
-            report(`${field}.binding.interfaceId`, "acl-interface-invalid", "Wähle ein gültiges Layer-3-Interface dieses Routers.");
-        }
+    if (acl.binding && !isLayer3Interface(device, data, acl.binding.interfaceId)) {
+        report(`${field}.binding.interfaceId`, "acl-interface-invalid", "Wähle ein gültiges Layer-3-Interface dieses Routers.");
     }
 }
 
-function isAclIpv4(value: string): boolean {
+function isLayer3Interface(device: Device, data: DeviceConfiguration, interfaceId: string): boolean {
+    const iface = device.interfaces.find(({ id }) => id === interfaceId);
+    const input = data.interfaces.find(({ id }) => id === interfaceId);
+    return !!iface && (input?.layer ?? iface.layer) !== 2 &&
+        iface.name === iface.name.trim() && /^[A-Za-z][A-Za-z0-9./-]*$/.test(iface.name);
+}
+
+function isCanonicalIpv4(value: string): boolean {
     return value === value.trim() && isValidIpv4Address(value) && !hasLeadingZeros(value);
 }
 

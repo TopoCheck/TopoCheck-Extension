@@ -3,9 +3,8 @@ import { NetworkDevice } from "../../models/networkDevice";
 
 /** Renders the validated ACL from the router's saved device configuration. */
 export class AclConfigGenerator {
-    public generate(device: NetworkDevice, protocol: AclProtocol): string {
+    public generate(device: NetworkDevice, protocol: AclProtocol, interfaceCommands: Map<string, string[]>): string[] {
         const lines: string[] = [];
-        const interfaceCommands = new Map<string, string[]>();
         for (const { name, rules, binding } of protocol.configurations) {
             lines.push(
                 `ip access-list extended ${name}`,
@@ -23,11 +22,7 @@ export class AclConfigGenerator {
             commands.push(` ip access-group ${name} ${binding.direction}`);
             interfaceCommands.set(iface.name, commands);
         }
-        for (const [name, commands] of interfaceCommands) {
-            lines.push(`interface ${name}`, ...commands, " exit");
-        }
-
-        return lines.join("\n");
+        return lines;
     }
 }
 

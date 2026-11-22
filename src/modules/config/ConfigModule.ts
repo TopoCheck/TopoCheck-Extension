@@ -4,8 +4,10 @@ import { TopologyStore } from "../topology/TopologyStore";
 import { RipConfigGenerator } from "./RipConfigGenerator";
 import { OspfConfigGenerator } from "./OspfConfigGenerator";
 import { AclConfigGenerator } from "./AclConfigGenerator";
+import { NatConfigGenerator } from "./NatConfigGenerator";
 import {
     AclProtocol,
+    NatProtocol,
     RipProtocol,
     OspfProtocol
 } from "../../models/ciscoProtocols";
@@ -16,6 +18,7 @@ export class ConfigModule implements IModule {
     private readonly ripGenerator = new RipConfigGenerator();
     private readonly ospfGenerator = new OspfConfigGenerator();
     private readonly aclGenerator = new AclConfigGenerator();
+    private readonly natGenerator = new NatConfigGenerator();
 
     constructor(private readonly store: TopologyStore) { }
 
@@ -53,19 +56,29 @@ export class ConfigModule implements IModule {
                     protocol instanceof AclProtocol && protocol.enabled && protocol.configurations.length > 0
             );
 
+            const nat = device.protocols.find(
+                (protocol): protocol is NatProtocol => protocol instanceof NatProtocol && protocol.enabled
+            );
+            const hasSecurityConfiguration = !!(acl || nat);
             if (ripEnabled) {
                 configurations.push(this.ripGenerator.generate(device));
+                if (hasSecurityConfiguration) { configurations.push(" exit"); }
             }
 
             if (ospfEnabled) {
                 configurations.push(this.ospfGenerator.generate(device));
+                if (hasSecurityConfiguration) { configurations.push(" exit"); }
             }
 
+            const interfaceCommands = new Map<string, string[]>();
+            if (nat) {
+                configurations.push(...this.natGenerator.generate(device, nat, interfaceCommands));
+            }
             if (acl) {
-                if (ripEnabled || ospfEnabled) {
-                    configurations.push(" exit");
-                }
-                configurations.push(this.aclGenerator.generate(device, acl));
+                configurations.push(...this.aclGenerator.generate(device, acl, interfaceCommands));
+            }
+            for (const [name, commands] of interfaceCommands) {
+                configurations.push(`interface ${name}`, ...commands, " exit");
             }
 
             if (configurations.length === 1) {

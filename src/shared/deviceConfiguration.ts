@@ -8,6 +8,7 @@ import type { Device } from "../modules/topology/models";
 import { DeviceConfigurationValidationError, validateDeviceConfiguration } from "./validateDeviceConfiguration";
 import type { DeviceAccessConfiguration } from "../models/deviceAccessConfiguration";
 import { AclProtocol, Ipv4AclConfiguration, MAX_IPV4_ACLS, MAX_IPV4_ACL_RULES, RipProtocol, OspfProtocol } from "../models/ciscoProtocols";
+import { MAX_STATIC_NAT_MAPPINGS, NatProtocol, StaticNatConfiguration } from "../models/ciscoProtocols";
 
 export interface DeviceConfiguration extends DeviceAccessConfiguration {
     label?: string;
@@ -25,6 +26,7 @@ export interface DeviceConfiguration extends DeviceAccessConfiguration {
         enabled: boolean;
         acl?: Ipv4AclConfiguration;
         acls?: Ipv4AclConfiguration[];
+        nat?: StaticNatConfiguration;
         rip?: {
             version: 1 | 2;
             noAutoSummary: boolean;
@@ -47,6 +49,20 @@ export interface DeviceConfiguration extends DeviceAccessConfiguration {
 }
 
 export { compatibleProtocols };
+
+function isStaticNatConfiguration(value: unknown): boolean {
+    if (!value || typeof value !== "object") { return false; }
+    const { insideInterfaceId, outsideInterfaceId, mappings } = value as Record<string, unknown>;
+    return typeof insideInterfaceId === "string" && insideInterfaceId.length <= 128 &&
+        typeof outsideInterfaceId === "string" && outsideInterfaceId.length <= 128 &&
+        Array.isArray(mappings) && mappings.length <= MAX_STATIC_NAT_MAPPINGS &&
+        mappings.every((mapping: unknown) => {
+            if (!mapping || typeof mapping !== "object") { return false; }
+            const { localAddress, globalAddress } = mapping as Record<string, unknown>;
+            return typeof localAddress === "string" && localAddress.length <= 15 &&
+                typeof globalAddress === "string" && globalAddress.length <= 15;
+        });
+}
 
 function isAclConfiguration(value: unknown): boolean {
     if (!value || typeof value !== "object") { return false; }
@@ -153,6 +169,7 @@ export function isDeviceConfiguration(value: unknown): value is DeviceConfigurat
                 typeof protocol.enabled === "boolean" &&
                 (protocol.rip === undefined || isRipConfiguration(protocol.rip)) &&
                 (protocol.ospf === undefined || isOspfConfiguration(protocol.ospf)) &&
+                (protocol.nat === undefined || (protocol.type === ProtocolType.Nat && isStaticNatConfiguration(protocol.nat))) &&
                 (protocol.acl === undefined || (protocol.type === ProtocolType.Acl && isAclConfiguration(protocol.acl))) &&
                 (protocol.acls === undefined || (protocol.type === ProtocolType.Acl && protocol.acl === undefined &&
                     Array.isArray(protocol.acls) && protocol.acls.length <= MAX_IPV4_ACLS && protocol.acls.every(isAclConfiguration))) &&
@@ -187,6 +204,9 @@ export function configurationOf(device: Device, connectedInterfaceIds: readonly 
                 result.acls = structuredClone(protocol.acls);
             } else if (protocol.acl !== undefined) {
                 result.acls = [structuredClone(protocol.acl)];
+            }
+            if (protocol.nat !== undefined) {
+                result.nat = structuredClone(protocol.nat);
             }
 
             if (protocol.rip !== undefined) {
@@ -261,6 +281,8 @@ export function buildConfiguredDevice(device: Device, data: DeviceConfiguration,
         const acls = protocol.acls ?? (protocol.acl === undefined ? undefined : [protocol.acl]);
         if (protocol.type === ProtocolType.Acl && acls !== undefined) {
             model.addProtocol(new AclProtocol(id, protocol.enabled, structuredClone(acls)));
+        } else if (protocol.type === ProtocolType.Nat && protocol.nat !== undefined) {
+            model.addProtocol(new NatProtocol(id, protocol.enabled, structuredClone(protocol.nat)));
         } else if (protocol.type === ProtocolType.Rip) {
             const rip = new RipProtocol(id);
             if (protocol.rip !== undefined) {

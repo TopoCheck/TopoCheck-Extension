@@ -1,5 +1,6 @@
 import type { Device } from "../modules/topology/models";
 import { Ipv4AclConfiguration, Ipv4AclRule, MAX_IPV4_ACLS, MAX_IPV4_ACL_RULES } from "../models/ciscoProtocols";
+import { MAX_STATIC_NAT_MAPPINGS, StaticNatConfiguration, StaticNatMapping } from "../models/ciscoProtocols";
 import { DeviceType } from "../models/deviceType";
 import { ProtocolType } from "../models/protocolType";
 import { compatibleProtocols, configurationOf, DeviceConfiguration } from "../shared/deviceConfiguration";
@@ -203,7 +204,7 @@ export class DeviceConfigurationForm {
         const cards = document.createElement("div");
         const readAcls = new Map<HTMLElement, () => Ipv4AclConfiguration>();
         const add = button("ACL hinzufügen");
-        add.className = "configuration-acl-add";
+        add.className = "configuration-add-item";
 
         const addAcl = (acl?: Ipv4AclConfiguration) => {
             const card = document.createElement("details");
@@ -212,7 +213,7 @@ export class DeviceConfigurationForm {
             const summary = document.createElement("summary");
             card.append(summary);
             const remove = button("ACL entfernen");
-            remove.className = "configuration-acl-remove";
+            remove.className = "configuration-remove-item";
             remove.addEventListener("click", () => {
                 const aclName = name.value.trim();
                 const question = aclName
@@ -257,18 +258,7 @@ export class DeviceConfigurationForm {
         saved: Ipv4AclConfiguration | undefined
     ): { name: HTMLInputElement; read: () => Ipv4AclConfiguration } {
         const name = input("text", saved?.name ?? "", 64);
-        const iface = document.createElement("select");
-        iface.append(new Option("Ohne Interface-Zuweisung", ""));
-        for (const entry of device.interfaces) {
-            if (entry.layer !== 2) {
-                iface.append(new Option(entry.name, entry.id));
-            }
-        }
-        const savedInterface = saved?.binding?.interfaceId ?? "";
-        if (savedInterface && !Array.from(iface.options).some((option) => option.value === savedInterface)) {
-            iface.append(new Option("Gespeichertes Interface nicht verfügbar", savedInterface));
-        }
-        iface.value = savedInterface;
+        const iface = layer3InterfaceSelect(device, "Ohne Interface-Zuweisung", saved?.binding?.interfaceId);
 
         const direction = document.createElement("select");
         direction.append(new Option("Eingehend (in)", "in"), new Option("Ausgehend (out)", "out"));
@@ -279,7 +269,7 @@ export class DeviceConfigurationForm {
         const rules = document.createElement("div");
         const readRules = new Map<HTMLElement, () => Ipv4AclRule>();
         const add = button("ACL-Regel hinzufügen");
-        add.className = "configuration-acl-add";
+        add.className = "configuration-add-item";
 
         const addRule = (rule?: Ipv4AclRule) => {
             const row = document.createElement("fieldset");
@@ -296,7 +286,7 @@ export class DeviceConfigurationForm {
             source.placeholder = destination.placeholder = "IPv4-Adresse oder any";
             sourceWildcard.placeholder = destinationWildcard.placeholder = "Leer für Einzeladresse oder any";
             const remove = button("Regel entfernen");
-            remove.className = "configuration-acl-remove";
+            remove.className = "configuration-remove-item";
             remove.addEventListener("click", () => {
                 this.showConfirmation("Möchtest du diese ACL-Regel wirklich entfernen?", "Regel entfernen", "Abbrechen", () => {
                     readRules.delete(row);
@@ -345,6 +335,67 @@ export class DeviceConfigurationForm {
                 } : undefined
             })
         };
+    }
+
+    private appendStaticNatSettings(
+        settings: HTMLElement,
+        device: Device,
+        saved: StaticNatConfiguration | undefined,
+        protocolIndex: number
+    ): () => StaticNatConfiguration {
+        const prefix = `protocols.${protocolIndex}.nat`;
+        const inside = layer3InterfaceSelect(device, "Inside-Interface auswählen", saved?.insideInterfaceId);
+        const outside = layer3InterfaceSelect(device, "Outside-Interface auswählen", saved?.outsideInterfaceId);
+        const rows = document.createElement("div");
+        const mappings = new Map<HTMLElement, () => StaticNatMapping>();
+        const add = button("NAT-Zuordnung hinzufügen");
+        add.className = "configuration-add-item";
+
+        const addMapping = (mapping?: StaticNatMapping) => {
+            const row = document.createElement("fieldset");
+            row.className = "configuration-advanced";
+            const legend = document.createElement("legend");
+            legend.textContent = "Statische NAT-Zuordnung";
+            const local = input("text", mapping?.localAddress ?? "", 15);
+            const global = input("text", mapping?.globalAddress ?? "", 15);
+            const remove = button("Zuordnung entfernen");
+            remove.className = "configuration-remove-item";
+            remove.addEventListener("click", () => {
+                this.showConfirmation("Möchtest du diese NAT-Zuordnung wirklich entfernen?", "Zuordnung entfernen", "Abbrechen", () => {
+                    mappings.delete(row);
+                    row.remove();
+                    add.disabled = false;
+                    this.dirty = true;
+                    this.clearValidationErrors();
+                    add.focus();
+                }, remove);
+            });
+            row.append(legend, field("Interne IP (Inside Local)", local),
+                field("Übersetzte IP (Inside Global)", global), remove);
+            mappings.set(row, () => ({
+                localAddress: local.value.trim(),
+                globalAddress: global.value.trim()
+            }));
+            rows.append(row);
+            add.disabled = mappings.size >= MAX_STATIC_NAT_MAPPINGS;
+            return local;
+        };
+
+        saved?.mappings.forEach(addMapping);
+        add.addEventListener("click", () => {
+            if (mappings.size >= MAX_STATIC_NAT_MAPPINGS) { return; }
+            this.dirty = true;
+            this.clearValidationErrors();
+            addMapping().focus();
+        });
+        settings.append(this.validatedField(`${prefix}.insideInterfaceId`, "Inside-Interface", inside),
+            this.validatedField(`${prefix}.outsideInterfaceId`, "Outside-Interface", outside), rows, add);
+
+        return () => ({
+            insideInterfaceId: inside.value,
+            outsideInterfaceId: outside.value,
+            mappings: Array.from(mappings.values(), (read) => read())
+        });
     }
 
     private open(device: Device, otherHostnames: string[], connectedIds: string[]): void {
@@ -475,7 +526,7 @@ export class DeviceConfigurationForm {
             const row = document.createElement("div");
             row.className = "configuration-protocol";
 
-            row.append(field(`${type.toUpperCase()} aktiviert`, enabled));
+            row.append(field(type === ProtocolType.Nat ? "Statisches NAT aktiviert" : `${type.toUpperCase()} aktiviert`, enabled));
             protocols.append(row);
 
             enabled.addEventListener("change", () => {
@@ -800,12 +851,16 @@ export class DeviceConfigurationForm {
             const readAcl = type === ProtocolType.Acl
                 ? this.appendAclSettings(settings, device, saved?.acls ?? [])
                 : undefined;
+            const readNat = type === ProtocolType.Nat
+                ? this.appendStaticNatSettings(settings, device, saved?.nat, protocolIndex)
+                : undefined;
 
             return {
                 type,
                 enabled,
                 settings,
                 readAcl,
+                readNat,
                 ripVersion,
                 ripNoAutoSummary,
                 ripNetworkControls,
@@ -852,6 +907,7 @@ export class DeviceConfigurationForm {
                     type,
                     enabled,
                     readAcl,
+                    readNat,
                     ripNetworkControls,
                     ripVersion,
                     ripNoAutoSummary,
@@ -864,6 +920,7 @@ export class DeviceConfigurationForm {
                     type,
                     enabled: enabled.checked,
                     ...(readAcl ? { acls: readAcl() } : {}),
+                    ...(readNat ? { nat: readNat() } : {}),
 
                     ...(type === ProtocolType.Rip
                         ? {
@@ -923,6 +980,21 @@ function section(title: string): HTMLFieldSetElement {
     const legend = document.createElement("legend"); legend.textContent = title; fieldset.append(legend);
     return fieldset;
 }
+function layer3InterfaceSelect(device: Device, placeholder: string, value = ""): HTMLSelectElement {
+    const select = document.createElement("select");
+    select.append(new Option(placeholder, ""));
+    for (const iface of device.interfaces) {
+        if (iface.layer !== 2) {
+            select.append(new Option(iface.name, iface.id));
+        }
+    }
+    if (value && !Array.from(select.options).some((option) => option.value === value)) {
+        select.append(new Option("Gespeichertes Interface nicht verfügbar", value));
+    }
+    select.value = value;
+    return select;
+}
+
 function field(text: string, control: HTMLElement): HTMLLabelElement {
     const label = document.createElement("label");
     label.className = control instanceof HTMLInputElement && control.type === "checkbox" ? "configuration-checkbox" : "";
