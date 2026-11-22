@@ -882,9 +882,91 @@ kbd {
     accent-color: var(--configuration-accent);
 }
 
-/* H3b: Protokollzeile "☐ Name … Status", darunter aufklappbare Eingaben */
-.configuration-protocol {
-    border-bottom: 1px solid var(--vscode-panel-border, #dedfe8);
+.configuration-protocol-group {
+    --protocol-group-accent: var(--vscode-charts-blue, var(--vscode-focusBorder));
+    margin-bottom: 10px;
+    border: 1px solid var(--vscode-panel-border, #dedfe8);
+    border-inline-start: 3px solid var(--protocol-group-accent);
+    border-radius: 6px;
+    background: var(--vscode-editor-background);
+}
+
+.configuration-protocol-group[data-group="switching"] {
+    --protocol-group-accent: var(--vscode-charts-purple, var(--vscode-focusBorder));
+}
+
+.configuration-protocol-group[data-group="services"] {
+    --protocol-group-accent: var(--vscode-charts-orange, var(--vscode-focusBorder));
+}
+
+.configuration-protocol-group[data-group="security"] {
+    --protocol-group-accent: var(--vscode-charts-green, var(--vscode-focusBorder));
+}
+
+.configuration-protocol-group > summary {
+    padding: 9px 10px;
+    border-radius: 3px;
+    background: var(--vscode-sideBarSectionHeader-background, var(--vscode-editor-background));
+    color: var(--vscode-sideBarSectionHeader-foreground, var(--vscode-foreground));
+    cursor: pointer;
+    font-size: 11px;
+    font-weight: 700;
+}
+
+.configuration-protocol-group > summary::marker {
+    color: var(--protocol-group-accent);
+}
+
+.configuration-protocol-list {
+    display: grid;
+    gap: 14px;
+    padding: 7px;
+}
+
+.configuration-protocol-card {
+    border: 1px solid var(--vscode-panel-border, #dedfe8);
+    border-radius: 5px;
+    background: var(--vscode-sideBar-background, var(--vscode-editor-background));
+}
+
+.configuration-protocol-card[data-enabled="true"] {
+    border-color: var(--protocol-group-accent);
+}
+
+.configuration-protocol-switch {
+    min-height: 34px;
+    padding: 0 8px;
+    cursor: pointer;
+    font-weight: 600;
+}
+
+.configuration-protocol-switch > span:first-child {
+    flex: 1;
+}
+
+.configuration-protocol-switch input {
+    accent-color: var(--protocol-group-accent);
+}
+
+.configuration-protocol-status {
+    padding: 2px 5px;
+    border-radius: 4px;
+    color: var(--vscode-descriptionForeground);
+    font-size: 10px;
+}
+
+.configuration-protocol-card[data-enabled="true"] .configuration-protocol-status {
+    background: color-mix(in srgb, var(--protocol-group-accent) 16%, transparent);
+    color: var(--vscode-foreground);
+}
+
+.configuration-protocol-settings:not([hidden]):not(:empty) {
+    padding: 9px 8px;
+    border-top: 1px solid var(--vscode-panel-border, #dedfe8);
+}
+
+.configuration-protocol-settings > .configuration-advanced:first-child {
+    margin-top: 0;
 }
 
 .configuration-protocol-row {
@@ -959,6 +1041,63 @@ kbd {
 .device-configuration .configuration-secondary {
     background: var(--vscode-button-secondaryBackground);
     color: var(--vscode-button-secondaryForeground);
+}
+
+.device-configuration .configuration-add-item,
+.device-configuration .configuration-remove-item,
+.device-configuration .configuration-delete-confirm {
+    min-height: 28px;
+    padding: 5px 9px;
+    border: 1px solid transparent;
+    font-weight: 600;
+}
+
+.device-configuration .configuration-add-item {
+    margin-top: 8px;
+    border-color: var(--vscode-button-border, transparent);
+    background: var(--vscode-button-background);
+    color: var(--vscode-button-foreground);
+}
+
+.device-configuration .configuration-add-item::before {
+    content: "+" / "";
+    margin-inline-end: 6px;
+}
+
+.device-configuration .configuration-add-item:not(:disabled):hover {
+    background: var(--vscode-button-hoverBackground);
+}
+
+.device-configuration .configuration-remove-item {
+    margin-top: 8px;
+    border-color: currentColor;
+    background: transparent;
+    color: var(--vscode-errorForeground, #c72e38);
+}
+
+.device-configuration .configuration-remove-item::before {
+    content: "−" / "";
+    margin-inline-end: 6px;
+}
+
+.device-configuration .configuration-remove-item:not(:disabled):hover {
+    background: color-mix(in srgb, currentColor 12%, transparent);
+}
+
+.device-configuration .configuration-delete-confirm {
+    background: #ad2935;
+    color: #fff;
+}
+
+.device-configuration .configuration-delete-confirm:not(:disabled):hover {
+    background: #92212c;
+}
+
+.device-configuration .configuration-add-item:focus-visible,
+.device-configuration .configuration-remove-item:focus-visible,
+.configuration-switch-notice button:focus-visible {
+    outline: 2px solid var(--vscode-focusBorder);
+    outline-offset: 2px;
 }
 
 .device-configuration button:disabled {

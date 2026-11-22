@@ -2,7 +2,11 @@ import { NetworkDevice } from "../../models/networkDevice";
 import { DeviceType } from "../../models/deviceType";
 
 export class BasicConfigGenerator {
-    public generate(device: NetworkDevice): string {
+    public generate(
+        device: NetworkDevice,
+        protocolBlocks: readonly string[] = [],
+        interfaceCommands?: ReadonlyMap<string, string[]>
+    ): string {
         if (device.type !== DeviceType.Router) {
             throw new Error(
                 "Basic configuration is only supported for routers."
@@ -28,6 +32,10 @@ export class BasicConfigGenerator {
                 .replace(/\^C/g, "");
 
             configuration.push(`banner motd #${banner}#`);
+        }
+
+        if (protocolBlocks.length > 0) {
+            configuration.push("", protocolBlocks.join("\n\n"));
         }
 
         for (const networkInterface of device.interfaces) {
@@ -58,6 +66,7 @@ export class BasicConfigGenerator {
                 networkInterface.enabled ? " no shutdown" : " shutdown"
             );
 
+            configuration.push(...(interfaceCommands?.get(networkInterface.name) ?? []));
             configuration.push(" exit");
         }
 

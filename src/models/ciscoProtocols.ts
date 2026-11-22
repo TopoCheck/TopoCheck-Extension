@@ -79,6 +79,61 @@ export class RipProtocol extends NetworkProtocol {
     }
 }
 
+export interface Ipv4AclRule {
+  action: "permit" | "deny";
+  source: string;
+  sourceWildcard: string;
+  destination: string;
+  destinationWildcard: string;
+}
+
+export interface Ipv4AclConfiguration {
+  name: string;
+  rules: Ipv4AclRule[];
+  binding?: { interfaceId: string; direction: "in" | "out" };
+}
+
+export const MAX_IPV4_ACL_RULES = 1024;
+export const MAX_IPV4_ACLS = 64;
+
+export class AclProtocol extends NetworkProtocol {
+  public constructor(id: string, enabled: boolean, public readonly configurations: Ipv4AclConfiguration[]) {
+    super({ id, enabled, type: ProtocolType.Acl });
+  }
+}
+
+export interface StaticNatMapping {
+  localAddress: string;
+  globalAddress: string;
+}
+
+export interface NatInterfaceRoles {
+  insideInterfaceId: string;
+  outsideInterfaceId: string;
+}
+
+export interface StaticNatConfiguration extends NatInterfaceRoles {
+  mappings: StaticNatMapping[];
+}
+
+export interface PatConfiguration extends NatInterfaceRoles {
+  aclName: string;
+}
+
+export const MAX_STATIC_NAT_MAPPINGS = 1024;
+
+export class NatProtocol extends NetworkProtocol {
+  public constructor(id: string, enabled: boolean, public readonly configuration: StaticNatConfiguration) {
+    super({ id, enabled, type: ProtocolType.Nat });
+  }
+}
+
+export class PatProtocol extends NetworkProtocol {
+  public constructor(id: string, enabled: boolean, public readonly configuration: PatConfiguration) {
+    super({ id, enabled, type: ProtocolType.Pat });
+  }
+}
+
 export interface SwitchportConfiguration {
   mode?: "access" | "trunk";
   accessVlan?: number;

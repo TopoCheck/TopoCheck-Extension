@@ -1,4 +1,6 @@
 import type { Device, PortMode, ProtocolSettings } from "../modules/topology/models";
+import { Ipv4AclConfiguration, Ipv4AclRule, MAX_IPV4_ACLS, MAX_IPV4_ACL_RULES } from "../models/ciscoProtocols";
+import { MAX_STATIC_NAT_MAPPINGS, PatConfiguration, StaticNatConfiguration, StaticNatMapping } from "../models/ciscoProtocols";
 import { DeviceType } from "../models/deviceType";
 import { ProtocolType } from "../models/protocolType";
 import { compatibleProtocols, configurationOf, DeviceConfiguration } from "../shared/deviceConfiguration";
@@ -15,7 +17,10 @@ const PROTOCOL_LABEL: Partial<Record<ProtocolType, string>> = {
 };
 const MIN_WIDTH = 280;
 /** Diese Protokolle haben eigene Formulare (Routing, DHCP); alle anderen nutzen die aufklappbare Protokollzeile. */
-const ROUTING_PROTOCOLS: readonly ProtocolType[] = [ProtocolType.Rip, ProtocolType.Ospf, ProtocolType.Dhcp, ProtocolType.StaticRoute];
+const FORM_PROTOCOLS: readonly ProtocolType[] = [
+    ProtocolType.Rip, ProtocolType.Ospf, ProtocolType.Dhcp, ProtocolType.StaticRoute,
+    ProtocolType.Acl, ProtocolType.Nat, ProtocolType.Pat
+];
 
 export interface FormWidthStore { initialWidth?: number; saveWidth(width: number): void }
 
@@ -29,6 +34,27 @@ interface ProtocolControl {
 
 type FieldControl = HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement;
 type FormControl = FieldControl | HTMLButtonElement;
+
+const PROTOCOL_GROUP_LABELS = {
+    routing: "Routing",
+    switching: "Switching",
+    services: "Netzwerkdienste",
+    security: "Sicherheit und Adressübersetzung"
+};
+
+const PROTOCOL_DISPLAY: Record<ProtocolType, { label: string; group: keyof typeof PROTOCOL_GROUP_LABELS }> = {
+    [ProtocolType.Rip]: { label: "RIP", group: "routing" },
+    [ProtocolType.Ospf]: { label: "OSPF", group: "routing" },
+    [ProtocolType.StaticRoute]: { label: "Statische Routen", group: "routing" },
+    [ProtocolType.Vlan]: { label: "VLAN", group: "switching" },
+    [ProtocolType.Stp]: { label: "STP", group: "switching" },
+    [ProtocolType.Rstp]: { label: "RSTP", group: "switching" },
+    [ProtocolType.EtherChannel]: { label: "EtherChannel", group: "switching" },
+    [ProtocolType.Dhcp]: { label: "DHCP", group: "services" },
+    [ProtocolType.Acl]: { label: "IPv4-ACL", group: "security" },
+    [ProtocolType.Nat]: { label: "Statisches NAT", group: "security" },
+    [ProtocolType.Pat]: { label: "PAT", group: "security" }
+};
 
 /** Non-modal inspector: edits are drafts until the extension confirms saving. */
 export class DeviceConfigurationForm {
@@ -143,17 +169,37 @@ export class DeviceConfigurationForm {
     }
 
     private confirmDiscard(text: string, discard: () => void): void {
-        if (!this.switchNotice) { return; }
-        this.switchNotice.replaceChildren();
+        this.showConfirmation(text, "Verwerfen", "Weiter bearbeiten", discard);
+    }
+
+    private showConfirmation(
+        text: string,
+        confirmLabel: string,
+        cancelLabel: string,
+        confirm: () => void,
+        trigger?: HTMLButtonElement
+    ): void {
+        const notice = this.switchNotice;
+        if (!notice) { return; }
+        notice.replaceChildren();
         const message = document.createElement("p");
         message.textContent = text;
-        const yes = button("Verwerfen");
-        yes.addEventListener("click", discard);
-        const no = button("Weiter bearbeiten");
-        no.addEventListener("click", () => { this.switchNotice!.hidden = true; });
-        this.switchNotice.append(message, yes, no);
-        this.switchNotice.hidden = false;
-        this.switchNotice.scrollIntoView({ block: "nearest" });
+        const yes = button(confirmLabel);
+        if (trigger) { yes.className = "configuration-delete-confirm"; }
+        yes.addEventListener("click", () => {
+            notice.hidden = true;
+            confirm();
+        });
+        const no = button(cancelLabel);
+        no.className = "configuration-secondary";
+        no.addEventListener("click", () => {
+            notice.hidden = true;
+            trigger?.focus();
+        });
+        notice.append(message, yes, no);
+        notice.hidden = false;
+        notice.scrollIntoView({ block: "nearest" });
+        if (trigger) { no.focus({ preventScroll: true }); }
     }
 
     private showError(message: string): void {
@@ -170,7 +216,7 @@ export class DeviceConfigurationForm {
     private showValidationErrors(errors: ConfigurationFieldError[]): void {
         this.clearValidationErrors();
         // Server-Pfade "protocols.<n>" beziehen sich auf die abgeschickte Liste, das Formular kennt Typen.
-        errors = errors.map((issue) => ({
+        errors = errors.map((issue) => this.fields.has(issue.field) ? issue : ({
             ...issue, field: issue.field.replace(/^protocols\.(\d+)/,
                 (match, index: string) => this.protocolTypes[Number(index)] ? `protocol:${this.protocolTypes[Number(index)]}` : match)
         }));
@@ -186,6 +232,9 @@ export class DeviceConfigurationForm {
         const first = errors.find((issue) => this.fields.has(issue.field));
         if (first) {
             const control = this.fields.get(first.field)!.control;
+            for (let details = control.closest("details"); details; details = details.parentElement?.closest("details") ?? null) {
+                details.open = true;
+            }
             if (control.closest<HTMLElement>(".configuration-interface-card")?.hidden && this.showAllInterfaces) {
                 this.showAllInterfaces.checked = true;
                 this.updateInterfaceVisibility();
@@ -227,6 +276,256 @@ export class DeviceConfigurationForm {
         this.fields.set(key, { control, error });
         wrapper.append(field(text, control), error);
         return wrapper;
+    }
+
+    private appendAclSettings(
+        settings: HTMLElement,
+        device: Device,
+        saved: readonly Ipv4AclConfiguration[]
+    ): () => Ipv4AclConfiguration[] {
+        const cards = document.createElement("div");
+        const readAcls = new Map<HTMLElement, () => Ipv4AclConfiguration>();
+        const add = button("ACL hinzufügen");
+        add.className = "configuration-add-item";
+
+        const addAcl = (acl?: Ipv4AclConfiguration) => {
+            const card = document.createElement("details");
+            card.className = "configuration-advanced";
+            card.open = acl === undefined || saved.length === 1;
+            const summary = document.createElement("summary");
+            card.append(summary);
+            const remove = button("ACL entfernen");
+            remove.className = "configuration-remove-item";
+            remove.addEventListener("click", () => {
+                const aclName = name.value.trim();
+                const question = aclName
+                    ? `Möchtest du die ACL „${aclName}“ mit allen Regeln wirklich entfernen?`
+                    : "Möchtest du diese ACL mit allen Regeln wirklich entfernen?";
+                this.showConfirmation(question, "ACL entfernen", "Abbrechen", () => {
+                    readAcls.delete(card);
+                    card.remove();
+                    add.disabled = false;
+                    this.dirty = true;
+                    this.clearValidationErrors();
+                    add.focus();
+                }, remove);
+            });
+            const { name, read } = this.appendAclFields(card, device, acl);
+            const updateTitle = () => { summary.textContent = name.value.trim() || "Neue IPv4-ACL"; };
+            readAcls.set(card, read);
+            updateTitle();
+            name.addEventListener("input", updateTitle);
+            card.append(remove);
+            cards.append(card);
+            add.disabled = readAcls.size >= MAX_IPV4_ACLS;
+            if (!acl) {
+                name.focus();
+            }
+        };
+
+        saved.forEach(addAcl);
+        add.addEventListener("click", () => {
+            if (readAcls.size >= MAX_IPV4_ACLS) { return; }
+            this.dirty = true;
+            this.clearValidationErrors();
+            addAcl();
+        });
+        settings.append(cards, add);
+        return () => Array.from(readAcls.values(), (read) => read());
+    }
+
+    private appendAclFields(
+        settings: HTMLElement,
+        device: Device,
+        saved: Ipv4AclConfiguration | undefined
+    ): { name: HTMLInputElement; read: () => Ipv4AclConfiguration } {
+        const name = input("text", saved?.name ?? "", 64);
+        const iface = layer3InterfaceSelect(device, "Ohne Interface-Zuweisung", saved?.binding?.interfaceId);
+
+        const direction = document.createElement("select");
+        direction.append(new Option("Eingehend (in)", "in"), new Option("Ausgehend (out)", "out"));
+        direction.value = saved?.binding?.direction ?? "in";
+        direction.disabled = !iface.value;
+        iface.addEventListener("change", () => { direction.disabled = !iface.value; });
+
+        const rules = document.createElement("div");
+        const readRules = new Map<HTMLElement, () => Ipv4AclRule>();
+        const add = button("ACL-Regel hinzufügen");
+        add.className = "configuration-add-item";
+
+        const addRule = (rule?: Ipv4AclRule) => {
+            const row = document.createElement("fieldset");
+            row.className = "configuration-advanced";
+            const legend = document.createElement("legend");
+            legend.textContent = "IPv4-Regel";
+            const action = document.createElement("select");
+            action.append(new Option("Erlauben (permit)", "permit"), new Option("Verwerfen (deny)", "deny"));
+            action.value = rule?.action ?? "permit";
+            const source = input("text", rule?.source ?? "", 15);
+            const sourceWildcard = input("text", rule?.sourceWildcard ?? "", 15);
+            const destination = input("text", rule?.destination ?? "", 15);
+            const destinationWildcard = input("text", rule?.destinationWildcard ?? "", 15);
+            source.placeholder = destination.placeholder = "IPv4-Adresse oder any";
+            sourceWildcard.placeholder = destinationWildcard.placeholder = "Leer für Einzeladresse oder any";
+            const remove = button("Regel entfernen");
+            remove.className = "configuration-remove-item";
+            remove.addEventListener("click", () => {
+                this.showConfirmation("Möchtest du diese ACL-Regel wirklich entfernen?", "Regel entfernen", "Abbrechen", () => {
+                    readRules.delete(row);
+                    row.remove();
+                    add.disabled = false;
+                    this.dirty = true;
+                    this.clearValidationErrors();
+                    add.focus();
+                }, remove);
+            });
+            row.append(legend, field("Aktion", action), field("Quelle", source),
+                field("Quell-Wildcard", sourceWildcard), field("Ziel", destination),
+                field("Ziel-Wildcard", destinationWildcard), remove);
+            readRules.set(row, () => ({
+                action: action.value === "deny" ? "deny" : "permit",
+                source: source.value.trim(),
+                sourceWildcard: sourceWildcard.value.trim(),
+                destination: destination.value.trim(),
+                destinationWildcard: destinationWildcard.value.trim()
+            }));
+            rules.append(row);
+            add.disabled = readRules.size >= MAX_IPV4_ACL_RULES;
+            return source;
+        };
+
+        for (const rule of saved?.rules ?? []) {
+            addRule(rule);
+        }
+        add.addEventListener("click", () => {
+            if (readRules.size >= MAX_IPV4_ACL_RULES) { return; }
+            this.dirty = true;
+            this.clearValidationErrors();
+            addRule().focus();
+        });
+        settings.append(field("ACL-Name", name), field("Interface (optional)", iface),
+            field("Richtung", direction), rules, add);
+
+        return {
+            name,
+            read: () => ({
+                name: name.value.trim(),
+                rules: Array.from(readRules.values(), (read) => read()),
+                binding: iface.value ? {
+                    interfaceId: iface.value,
+                    direction: direction.value === "out" ? "out" : "in"
+                } : undefined
+            })
+        };
+    }
+
+    private appendStaticNatSettings(
+        settings: HTMLElement,
+        device: Device,
+        saved: StaticNatConfiguration | undefined,
+        protocolIndex: number
+    ): () => StaticNatConfiguration {
+        const prefix = `protocols.${protocolIndex}.nat`;
+        const inside = layer3InterfaceSelect(device, "Inside-Interface auswählen", saved?.insideInterfaceId);
+        const outside = layer3InterfaceSelect(device, "Outside-Interface auswählen", saved?.outsideInterfaceId);
+        const rows = document.createElement("div");
+        const mappings = new Map<HTMLElement, () => StaticNatMapping>();
+        const add = button("NAT-Zuordnung hinzufügen");
+        add.className = "configuration-add-item";
+
+        const addMapping = (mapping?: StaticNatMapping) => {
+            const row = document.createElement("fieldset");
+            row.className = "configuration-advanced";
+            const legend = document.createElement("legend");
+            legend.textContent = "Statische NAT-Zuordnung";
+            const local = input("text", mapping?.localAddress ?? "", 15);
+            const global = input("text", mapping?.globalAddress ?? "", 15);
+            const remove = button("Zuordnung entfernen");
+            remove.className = "configuration-remove-item";
+            remove.addEventListener("click", () => {
+                this.showConfirmation("Möchtest du diese NAT-Zuordnung wirklich entfernen?", "Zuordnung entfernen", "Abbrechen", () => {
+                    mappings.delete(row);
+                    row.remove();
+                    add.disabled = false;
+                    this.dirty = true;
+                    this.clearValidationErrors();
+                    add.focus();
+                }, remove);
+            });
+            row.append(legend, field("Interne IP (Inside Local)", local),
+                field("Übersetzte IP (Inside Global)", global), remove);
+            mappings.set(row, () => ({
+                localAddress: local.value.trim(),
+                globalAddress: global.value.trim()
+            }));
+            rows.append(row);
+            add.disabled = mappings.size >= MAX_STATIC_NAT_MAPPINGS;
+            return local;
+        };
+
+        saved?.mappings.forEach(addMapping);
+        add.addEventListener("click", () => {
+            if (mappings.size >= MAX_STATIC_NAT_MAPPINGS) { return; }
+            this.dirty = true;
+            this.clearValidationErrors();
+            addMapping().focus();
+        });
+        settings.append(this.validatedField(`${prefix}.insideInterfaceId`, "Inside-Interface", inside),
+            this.validatedField(`${prefix}.outsideInterfaceId`, "Outside-Interface", outside), rows, add);
+
+        return () => ({
+            insideInterfaceId: inside.value,
+            outsideInterfaceId: outside.value,
+            mappings: Array.from(mappings.values(), (read) => read())
+        });
+    }
+
+    private appendPatSettings(
+        settings: HTMLElement,
+        enabled: HTMLInputElement,
+        device: Device,
+        saved: PatConfiguration | undefined,
+        protocolIndex: number,
+        readAcls: () => Ipv4AclConfiguration[],
+        readNat: () => StaticNatConfiguration | undefined
+    ): () => PatConfiguration {
+        const prefix = `protocols.${protocolIndex}.pat`;
+        const inside = layer3InterfaceSelect(device, "Inside-Interface auswählen", saved?.insideInterfaceId);
+        const outside = layer3InterfaceSelect(device, "Outside-Interface auswählen", saved?.outsideInterfaceId);
+        const acl = document.createElement("select");
+        const refreshAclOptions = (selected: string) => {
+            const names = new Set(readAcls().map(({ name }) => name).filter(Boolean));
+            acl.replaceChildren(new Option("ACL auswählen", ""));
+            for (const name of names) {
+                acl.append(new Option(name, name));
+            }
+            if (selected && !names.has(selected)) {
+                const unavailable = new Option(`${selected} (nicht verfügbar)`, selected);
+                unavailable.disabled = true;
+                acl.append(unavailable);
+            }
+            acl.value = selected;
+        };
+        refreshAclOptions(saved?.aclName ?? "");
+        acl.addEventListener("focus", () => refreshAclOptions(acl.value));
+        enabled.addEventListener("change", () => {
+            if (!enabled.checked) { return; }
+            refreshAclOptions(acl.value);
+            const nat = readNat();
+            if (nat) {
+                inside.value ||= nat.insideInterfaceId;
+                outside.value ||= nat.outsideInterfaceId;
+            }
+        });
+        settings.append(this.validatedField(`${prefix}.aclName`, "ACL für zu übersetzenden Verkehr", acl),
+            this.validatedField(`${prefix}.insideInterfaceId`, "Inside-Interface", inside),
+            this.validatedField(`${prefix}.outsideInterfaceId`, "Outside-Interface für Overload", outside));
+
+        return () => ({
+            aclName: acl.value,
+            insideInterfaceId: inside.value,
+            outsideInterfaceId: outside.value
+        });
     }
 
     private open(device: Device, otherHostnames: string[], connectedIds: string[]): void {
@@ -366,13 +665,31 @@ export class DeviceConfigurationForm {
 
 
         const protocols = section("Protokolle");
+        const protocolGroups = new Map<keyof typeof PROTOCOL_GROUP_LABELS, HTMLDivElement>();
+        const protocolCards = (group: keyof typeof PROTOCOL_GROUP_LABELS): HTMLDivElement => {
+            const existing = protocolGroups.get(group);
+            if (existing) { return existing; }
+            const category = document.createElement("details");
+            category.className = "configuration-protocol-group";
+            category.dataset.group = group;
+            category.open = true;
+            const summary = document.createElement("summary");
+            summary.textContent = PROTOCOL_GROUP_LABELS[group];
+            const cards = document.createElement("div");
+            cards.className = "configuration-protocol-list";
+            category.append(summary, cards);
+            protocols.append(category);
+            protocolGroups.set(group, cards);
+            return cards;
+        };
         const deviceProtocols: readonly ProtocolType[] = compatibleProtocols[device.type as DeviceType];
         // H3b: VLAN, STP, RSTP, EtherChannel als Zeile "☐ Name … Aktiviert" mit aufklappbarem Formular
-        const protocolControls: ProtocolControl[] = deviceProtocols.filter((type) => !ROUTING_PROTOCOLS.includes(type)).map((type: ProtocolType) => {
+        const protocolControls: ProtocolControl[] = deviceProtocols.filter((type) => !FORM_PROTOCOLS.includes(type)).map((type: ProtocolType) => {
             const saved = draft.protocols.find((item) => item.type === type);
             const settings = saved?.settings ?? defaultSettings(type);
             const item = this.protocolItem(type, saved !== undefined, settings);
-            protocols.append(item.element);
+            item.element.classList.add("configuration-protocol-card");
+            protocolCards(PROTOCOL_DISPLAY[type].group).append(item.element);
             return item.control;
         });
         const vlanControl = protocolControls.find((item) => item.type === ProtocolType.Vlan);
@@ -392,27 +709,37 @@ export class DeviceConfigurationForm {
         refreshSwitchPorts();
 
         // Protokolle mit eigenen Formularen (RIP, OSPF, DHCP, statische Routen)
-        const routingControls = deviceProtocols.filter((type) => ROUTING_PROTOCOLS.includes(type)).map((type: ProtocolType) => {
+        const routingControls = deviceProtocols.filter((type) => FORM_PROTOCOLS.includes(type)).map((type, protocolIndex) => {
             const saved = draft.protocols.find((item) => item.type === type);
             const savedProcesses = saved?.ospf?.processes ?? [];
+            const { label, group } = PROTOCOL_DISPLAY[type];
+            const cards = protocolCards(group);
 
             const enabled = input("checkbox");
             enabled.checked = saved?.enabled ?? false;
-            enabled.setAttribute("aria-label", `${type.toUpperCase()} aktiviert`);
+            enabled.setAttribute("aria-label", `${label} aktiviert`);
 
             const settings = document.createElement("div");
             settings.className = "configuration-protocol-settings";
-            settings.hidden = !enabled.checked;
 
-            const row = document.createElement("div");
-            row.className = "configuration-protocol";
+            const card = document.createElement("div");
+            card.className = "configuration-protocol-card";
+            const toggle = field(label, enabled);
+            toggle.classList.add("configuration-protocol-switch");
+            const status = document.createElement("span");
+            status.className = "configuration-protocol-status";
+            status.setAttribute("aria-hidden", "true");
+            toggle.insertBefore(status, enabled);
+            card.append(toggle, settings);
+            cards.append(card);
 
-            row.append(field(`${type.toUpperCase()} aktiviert`, enabled));
-            protocols.append(row);
-
-            enabled.addEventListener("change", () => {
+            const updateProtocolState = () => {
+                card.dataset.enabled = String(enabled.checked);
+                status.textContent = enabled.checked ? "Aktiv" : "Aus";
                 settings.hidden = !enabled.checked;
-            });
+            };
+            enabled.addEventListener("change", updateProtocolState);
+            updateProtocolState();
 
             const ripNetworkControls: HTMLInputElement[] = [];
 
@@ -966,12 +1293,19 @@ export class DeviceConfigurationForm {
                 settings.append(routeList, addButton);
             }
 
-            protocols.append(settings);
+            const readAcl = type === ProtocolType.Acl
+                ? this.appendAclSettings(settings, device, saved?.acls ?? [])
+                : undefined;
+            const readNat = type === ProtocolType.Nat
+                ? this.appendStaticNatSettings(settings, device, saved?.nat, protocolIndex)
+                : undefined;
 
             return {
                 type,
                 enabled,
                 settings,
+                readAcl,
+                readNat,
                 ripVersion,
                 ripNoAutoSummary,
                 ripNetworkControls,
@@ -991,6 +1325,20 @@ export class DeviceConfigurationForm {
                 savedProcesses
             };
         });
+
+        const aclControl = routingControls.find(({ type }) => type === ProtocolType.Acl);
+        const natControl = routingControls.find(({ type }) => type === ProtocolType.Nat);
+        const patIndex = routingControls.findIndex(({ type }) => type === ProtocolType.Pat);
+        const patControl = routingControls[patIndex];
+        const readPat = patControl && this.appendPatSettings(
+            patControl.settings,
+            patControl.enabled,
+            device,
+            draft.protocols.find(({ type }) => type === ProtocolType.Pat)?.pat,
+            patIndex,
+            () => (aclControl?.enabled.checked ? aclControl.readAcl?.() ?? [] : []),
+            () => (natControl?.enabled.checked ? natControl.readNat?.() : undefined)
+        );
 
         if (!deviceProtocols.length) {
             protocols.append(document.createTextNode("Keine Protokolle für diesen Gerätetyp."));
@@ -1025,6 +1373,8 @@ export class DeviceConfigurationForm {
                 protocols: [...routingControls.map(({
                     type,
                     enabled,
+                    readAcl,
+                    readNat,
                     ripNetworkControls,
                     dhcpPoolControls,
                     ripVersion,
@@ -1038,6 +1388,9 @@ export class DeviceConfigurationForm {
                 }) => ({
                     type,
                     enabled: enabled.checked,
+                    ...(readAcl ? { acls: readAcl() } : {}),
+                    ...(readNat ? { nat: readNat() } : {}),
+                    ...(type === ProtocolType.Pat && readPat ? { pat: readPat() } : {}),
 
                     ...(type === ProtocolType.Rip
                         ? {
@@ -1096,7 +1449,6 @@ export class DeviceConfigurationForm {
                                     subnetMask: route.subnetMask.value.trim(),
                                     nextHop: route.nextHop.value.trim() || undefined,
                                     outgoingInterface: route.outgoingInterface.value || undefined,
-                                    
                                     administrativeDistance: Number(
                                         route.administrativeDistance.value || 1
                                     )
@@ -1240,6 +1592,21 @@ function section(title: string): HTMLFieldSetElement {
     const legend = document.createElement("legend"); legend.textContent = title; fieldset.append(legend);
     return fieldset;
 }
+function layer3InterfaceSelect(device: Device, placeholder: string, value = ""): HTMLSelectElement {
+    const select = document.createElement("select");
+    select.append(new Option(placeholder, ""));
+    for (const iface of device.interfaces) {
+        if (iface.layer !== 2) {
+            select.append(new Option(iface.name, iface.id));
+        }
+    }
+    if (value && !Array.from(select.options).some((option) => option.value === value)) {
+        select.append(new Option("Gespeichertes Interface nicht verfügbar", value));
+    }
+    select.value = value;
+    return select;
+}
+
 function field(text: string, control: HTMLElement): HTMLLabelElement {
     const label = document.createElement("label");
     label.className = control instanceof HTMLInputElement && control.type === "checkbox" ? "configuration-checkbox" : "";
