@@ -54,14 +54,15 @@ suite("IPv4 ACL configuration generation", () => {
         assert.strictEqual(await new ConfigModule(store).generateForTopology(topologyId), 1);
         assert.strictEqual(await readConfig(), [
             `hostname ${router.hostname}`,
+            "",
             "ip access-list extended LAB_FILTER",
             " deny ip host 192.0.2.4 any",
             " permit ip 192.0.2.0 0.0.0.255 any",
             " deny ip any host 198.51.100.1",
-            " exit",
+            " exit", "",
             `interface ${router.interfaces[0].name}`,
             " ip access-group LAB_FILTER in",
-            " exit",
+            " exit", "",
             "end"
         ].join("\n"));
     });
@@ -77,7 +78,7 @@ suite("IPv4 ACL configuration generation", () => {
         const generator = new ConfigModule(store);
         assert.strictEqual(await generator.generateForTopology(topologyId), 1);
         const config = await readConfig();
-        assert.ok(config.includes(" network 10.0.0.0\n exit\nip access-list extended LAB_FILTER"));
+        assert.ok(config.includes(" network 10.0.0.0\n exit\n\nip access-list extended LAB_FILTER"));
         assert.ok(!config.includes("ip access-group"));
 
         draft.protocols = [{ type: ProtocolType.Acl, enabled: false, acls: [acl] }];
@@ -117,11 +118,11 @@ suite("IPv4 ACL configuration generation", () => {
         assert.strictEqual(await new ConfigModule(store).generateForTopology(topologyId), 1);
 
         const config = await readConfig();
-        assert.ok(config.indexOf("ip access-list extended LAB_FILTER") < config.indexOf("ip access-list extended OUTBOUND"));
+        assert.ok(config.includes(" deny ip any host 198.51.100.1\n exit\n\nip access-list extended OUTBOUND"));
         assert.ok(config.endsWith([
-            "ip access-list extended OUTBOUND", " permit ip any any", " exit",
+            "ip access-list extended OUTBOUND", " permit ip any any", " exit", "",
             `interface ${router.interfaces[0].name}`, " ip access-group LAB_FILTER in",
-            " ip access-group OUTBOUND out", " exit", "end"
+            " ip access-group OUTBOUND out", " exit", "", "end"
         ].join("\n")));
     });
 

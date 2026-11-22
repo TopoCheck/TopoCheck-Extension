@@ -13,6 +13,27 @@ import { vscodeApi } from "./vscodeApi";
 type FieldControl = HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement;
 type FormControl = FieldControl | HTMLButtonElement;
 
+const PROTOCOL_GROUP_LABELS = {
+    routing: "Routing",
+    switching: "Switching",
+    services: "Netzwerkdienste",
+    security: "Sicherheit und Adressübersetzung"
+};
+
+const PROTOCOL_DISPLAY: Record<ProtocolType, { label: string; group: keyof typeof PROTOCOL_GROUP_LABELS }> = {
+    [ProtocolType.Rip]: { label: "RIP", group: "routing" },
+    [ProtocolType.Ospf]: { label: "OSPF", group: "routing" },
+    [ProtocolType.StaticRoute]: { label: "Statische Routen", group: "routing" },
+    [ProtocolType.Vlan]: { label: "VLAN", group: "switching" },
+    [ProtocolType.Stp]: { label: "STP", group: "switching" },
+    [ProtocolType.Rstp]: { label: "RSTP", group: "switching" },
+    [ProtocolType.EtherChannel]: { label: "EtherChannel", group: "switching" },
+    [ProtocolType.Dhcp]: { label: "DHCP", group: "services" },
+    [ProtocolType.Acl]: { label: "IPv4-ACL", group: "security" },
+    [ProtocolType.Nat]: { label: "Statisches NAT", group: "security" },
+    [ProtocolType.Pat]: { label: "PAT", group: "security" }
+};
+
 /** Non-modal inspector: edits are drafts until the extension confirms saving. */
 export class DeviceConfigurationForm {
     private readonly dialog = document.createElement("dialog");
@@ -153,6 +174,9 @@ export class DeviceConfigurationForm {
         const first = errors.find((issue) => this.fields.has(issue.field));
         if (first) {
             const control = this.fields.get(first.field)!.control;
+            for (let details = control.closest("details"); details; details = details.parentElement?.closest("details") ?? null) {
+                details.open = true;
+            }
             if (control.closest<HTMLElement>(".configuration-interface-card")?.hidden && this.showAllInterfaces) {
                 this.showAllInterfaces.checked = true;
                 this.updateInterfaceVisibility();
@@ -558,28 +582,52 @@ export class DeviceConfigurationForm {
 
 
         const protocols = section("Protokolle");
+        const protocolGroups = new Map<keyof typeof PROTOCOL_GROUP_LABELS, HTMLDivElement>();
 
         const protocolControls = compatibleProtocols[device.type as DeviceType].map((type: ProtocolType, protocolIndex: number) => {
             const saved = draft.protocols.find((item) => item.type === type);
             const savedProcesses = saved?.ospf?.processes ?? [];
+            const { label, group } = PROTOCOL_DISPLAY[type];
+            let cards = protocolGroups.get(group);
+            if (!cards) {
+                const category = document.createElement("details");
+                category.className = "configuration-protocol-group";
+                category.dataset.group = group;
+                category.open = true;
+                const summary = document.createElement("summary");
+                summary.textContent = PROTOCOL_GROUP_LABELS[group];
+                cards = document.createElement("div");
+                cards.className = "configuration-protocol-list";
+                category.append(summary, cards);
+                protocols.append(category);
+                protocolGroups.set(group, cards);
+            }
 
             const enabled = input("checkbox");
             enabled.checked = saved?.enabled ?? false;
-            enabled.setAttribute("aria-label", `${type.toUpperCase()} aktiviert`);
+            enabled.setAttribute("aria-label", `${label} aktiviert`);
 
             const settings = document.createElement("div");
             settings.className = "configuration-protocol-settings";
-            settings.hidden = !enabled.checked;
 
-            const row = document.createElement("div");
-            row.className = "configuration-protocol";
+            const card = document.createElement("div");
+            card.className = "configuration-protocol-card";
+            const toggle = field(label, enabled);
+            toggle.classList.add("configuration-protocol-toggle");
+            const status = document.createElement("span");
+            status.className = "configuration-protocol-status";
+            status.setAttribute("aria-hidden", "true");
+            toggle.insertBefore(status, enabled);
+            card.append(toggle, settings);
+            cards.append(card);
 
-            row.append(field(type === ProtocolType.Nat ? "Statisches NAT aktiviert" : `${type.toUpperCase()} aktiviert`, enabled));
-            protocols.append(row);
-
-            enabled.addEventListener("change", () => {
+            const updateProtocolState = () => {
+                card.dataset.enabled = String(enabled.checked);
+                status.textContent = enabled.checked ? "Aktiv" : "Aus";
                 settings.hidden = !enabled.checked;
-            });
+            };
+            enabled.addEventListener("change", updateProtocolState);
+            updateProtocolState();
 
             const ripNetworkControls: HTMLInputElement[] = [];
 
@@ -895,7 +943,6 @@ export class DeviceConfigurationForm {
                 settings.append(ospfSettings);
             }
 
-            protocols.append(settings);
             const readAcl = type === ProtocolType.Acl
                 ? this.appendAclSettings(settings, device, saved?.acls ?? [])
                 : undefined;

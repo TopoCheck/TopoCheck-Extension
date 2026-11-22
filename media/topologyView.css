@@ -881,12 +881,91 @@ kbd {
     accent-color: var(--configuration-accent);
 }
 
-.configuration-protocol {
-    display: flex;
-    justify-content: space-between;
-    gap: 12px;
-    padding: 8px 0;
-    border-bottom: 1px solid var(--vscode-panel-border, #dedfe8);
+.configuration-protocol-group {
+    --protocol-group-accent: var(--vscode-charts-blue, var(--vscode-focusBorder));
+    margin-bottom: 10px;
+    border: 1px solid var(--vscode-panel-border, #dedfe8);
+    border-inline-start: 3px solid var(--protocol-group-accent);
+    border-radius: 6px;
+    background: var(--vscode-editor-background);
+}
+
+.configuration-protocol-group[data-group="switching"] {
+    --protocol-group-accent: var(--vscode-charts-purple, var(--vscode-focusBorder));
+}
+
+.configuration-protocol-group[data-group="services"] {
+    --protocol-group-accent: var(--vscode-charts-orange, var(--vscode-focusBorder));
+}
+
+.configuration-protocol-group[data-group="security"] {
+    --protocol-group-accent: var(--vscode-charts-green, var(--vscode-focusBorder));
+}
+
+.configuration-protocol-group > summary {
+    padding: 9px 10px;
+    border-radius: 3px;
+    background: var(--vscode-sideBarSectionHeader-background, var(--vscode-editor-background));
+    color: var(--vscode-sideBarSectionHeader-foreground, var(--vscode-foreground));
+    cursor: pointer;
+    font-size: 11px;
+    font-weight: 700;
+}
+
+.configuration-protocol-group > summary::marker {
+    color: var(--protocol-group-accent);
+}
+
+.configuration-protocol-list {
+    display: grid;
+    gap: 14px;
+    padding: 7px;
+}
+
+.configuration-protocol-card {
+    border: 1px solid var(--vscode-panel-border, #dedfe8);
+    border-radius: 5px;
+    background: var(--vscode-sideBar-background, var(--vscode-editor-background));
+}
+
+.configuration-protocol-card[data-enabled="true"] {
+    border-color: var(--protocol-group-accent);
+}
+
+.configuration-protocol-toggle {
+    min-height: 34px;
+    padding: 0 8px;
+    cursor: pointer;
+    font-weight: 600;
+}
+
+.configuration-protocol-toggle > span:first-child {
+    flex: 1;
+}
+
+.configuration-protocol-toggle input {
+    accent-color: var(--protocol-group-accent);
+}
+
+.configuration-protocol-status {
+    padding: 2px 5px;
+    border-radius: 4px;
+    color: var(--vscode-descriptionForeground);
+    font-size: 10px;
+}
+
+.configuration-protocol-card[data-enabled="true"] .configuration-protocol-status {
+    background: color-mix(in srgb, var(--protocol-group-accent) 16%, transparent);
+    color: var(--vscode-foreground);
+}
+
+.configuration-protocol-settings:not([hidden]):not(:empty) {
+    padding: 9px 8px;
+    border-top: 1px solid var(--vscode-panel-border, #dedfe8);
+}
+
+.configuration-protocol-settings > .configuration-advanced:first-child {
+    margin-top: 0;
 }
 
 .configuration-actions {

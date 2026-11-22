@@ -32,7 +32,7 @@ export class OspfConfigGenerator {
             );
         }
 
-        const lines: string[] = [];
+        const blocks: string[] = [];
 
         for (const process of ospfProtocol.processes) {
             if (
@@ -76,7 +76,7 @@ export class OspfConfigGenerator {
                 );
             }
 
-            lines.push(`router ospf ${process.processId}`);
+            const lines = [`router ospf ${process.processId}`];
 
             if (process.routerId !== undefined) {
                 lines.push(` router-id ${process.routerId}`);
@@ -111,9 +111,10 @@ export class OspfConfigGenerator {
                     ` network ${network.address} ${network.wildcardMask} area ${network.area}`
                 );
             }
+            blocks.push(lines.join("\n"));
         }
 
-        return lines.join("\n");
+        return blocks.join("\n\n");
     }
 
 }

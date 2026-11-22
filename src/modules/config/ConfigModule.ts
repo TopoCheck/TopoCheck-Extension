@@ -41,7 +41,7 @@ export class ConfigModule implements IModule {
                 router.id
             );
 
-            const configurations: string[] = [
+            const blocks: string[] = [
                 `hostname ${device.hostname}`
             ];
 
@@ -64,38 +64,34 @@ export class ConfigModule implements IModule {
                 (protocol): protocol is PatProtocol => protocol instanceof PatProtocol && protocol.enabled
             );
             const hasSecurityConfiguration = !!(acl || nat || pat);
+            const routingExit = hasSecurityConfiguration ? "\n exit" : "";
             if (ripEnabled) {
-                configurations.push(this.ripGenerator.generate(device));
-                if (hasSecurityConfiguration) { configurations.push(" exit"); }
+                blocks.push(this.ripGenerator.generate(device) + routingExit);
             }
 
             if (ospfEnabled) {
-                configurations.push(this.ospfGenerator.generate(device));
-                if (hasSecurityConfiguration) { configurations.push(" exit"); }
+                blocks.push(this.ospfGenerator.generate(device) + routingExit);
             }
 
             const interfaceCommands = new Map<string, string[]>();
             if (nat) {
-                configurations.push(...this.natGenerator.generate(device, nat, interfaceCommands));
+                blocks.push(this.natGenerator.generate(device, nat, interfaceCommands).join("\n"));
             }
             if (acl) {
-                configurations.push(...this.aclGenerator.generate(device, acl, interfaceCommands));
+                blocks.push(...this.aclGenerator.generate(device, acl, interfaceCommands));
             }
             if (pat) {
-                configurations.push(this.natGenerator.generatePat(device, pat, interfaceCommands));
+                blocks.push(this.natGenerator.generatePat(device, pat, interfaceCommands));
             }
             for (const [name, commands] of interfaceCommands) {
-                configurations.push(`interface ${name}`, ...commands, " exit");
+                blocks.push([`interface ${name}`, ...commands, " exit"].join("\n"));
             }
 
-            if (configurations.length === 1) {
+            if (blocks.length === 1) {
                 continue;
             }
 
-            const content = [
-                ...configurations,
-                "end"
-            ].join("\n");
+            const content = [...blocks, "end"].join("\n\n");
 
             await this.store.saveGeneratedConfig(
                 topologyId,
