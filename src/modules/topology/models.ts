@@ -11,7 +11,7 @@ import type { DeviceAccessConfiguration } from "../../models/deviceAccessConfigu
 
 export type DeviceType = "router" | "switch" | "pc";
 export type InterfaceStatus = "up" | "down";
-export const CURRENT_SCHEMA_VERSION = 2;
+export const CURRENT_SCHEMA_VERSION = 3;
 export type Position = Point;
 
 /**
@@ -33,6 +33,32 @@ export interface Interface {
     type?: InterfaceType;
     description?: string;
     layer?: 2 | 3;
+    /** H3b, nur Switch-Ports: VLAN des Endgeräts bzw. Routers (Access-Port). */
+    accessVlan?: number;
+    /** H3b, nur Switch-Ports: "auto" lässt den Generator nach der Gegenstelle entscheiden. */
+    portMode?: PortMode;
+}
+
+export type PortMode = "auto" | "access" | "trunk";
+export type StpRootRole = "auto" | "primary" | "secondary" | "none";
+export type LacpMode = "active" | "passive";
+
+export interface VlanDefinition { id: number; name: string }
+
+/** H3b: Protokollspezifische Eingaben aus dem Formular; je Protokolltyp nur das passende Feld. */
+export interface ProtocolSettings {
+    vlans?: VlanDefinition[];
+    nativeVlan?: number;
+    rootRole?: StpRootRole;
+    lacpMode?: LacpMode;
+}
+
+export interface DeviceProtocol {
+    id: string;
+    type: ProtocolType;
+    /** true nur, wenn alle Pflichtangaben des Protokolls ausgefüllt sind. */
+    enabled: boolean;
+    settings?: ProtocolSettings;
 }
 
 export interface DeviceConfig {

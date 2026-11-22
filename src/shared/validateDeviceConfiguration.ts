@@ -1,563 +1,465 @@
 import { DeviceType } from "../models/deviceType";
 import { InterfaceType } from "../models/interfaceType";
-import { isValidIpv4Address, isValidSubnetMask } from "../models/ipv4";
-import { compatibleProtocols } from "../models/networkDevice";
+import { NetworkDevice, compatibleProtocols } from "../models/networkDevice";
+import { NetworkInterface } from "../models/networkInterface";
+import { NetworkProtocol } from "../models/networkProtocol";
 import { ProtocolType } from "../models/protocolType";
-import { isHostnameTaken, validateHostname } from "../modules/topology/hostname";
-import type { Device } from "../modules/topology/models";
-import type { DeviceConfiguration } from "./deviceConfiguration";
+import type { Device, PortMode, ProtocolSettings } from "../modules/topology/models";
+import { DeviceConfigurationValidationError, validateDeviceConfiguration } from "./validateDeviceConfiguration";
+import type { DeviceAccessConfiguration } from "../models/deviceAccessConfiguration";
+import { RipProtocol, OspfProtocol, StaticRouteProtocol, DhcpProtocol } from "../models/ciscoProtocols";
 
-export interface ConfigurationFieldError {
-    /** Indexed field paths, e.g. interfaces.0.ipAddress; suitable for any UI. */
-    field: string;
-    code: string;
-    message: string;
+export interface DeviceConfiguration extends DeviceAccessConfiguration {
+    label?: string;
+    hostname: string;
+    interfaces: {
+        id: string;
+        enabled: boolean;
+        ipAddress: string;
+        subnetMask: string;
+        description?: string;
+        layer?: 2 | 3;
+        accessVlan?: number;
+        portMode?: PortMode;
+    }[];
+    protocols: {
+        type: ProtocolType;
+        enabled: boolean;
+        settings?: ProtocolSettings;
+        rip?: {
+            version: 1 | 2;
+            noAutoSummary: boolean;
+            networks: { address: string }[];
+        };
+        ospf?: {
+            processes: {
+                processId: number;
+                routerId?: string;
+                networks: {
+                    address: string;
+                    wildcardMask: string;
+                    area: string;
+                }[];
+                passiveInterfaceDefault: boolean;
+                passiveInterfaces: Record<string, boolean>;
+            }[];
+        };
+        dhcp?: {
+            pools: {
+                name: string;
+                interfaceName: string;
+                dnsServer?: string;
+                excludedAddresses?: string[];
+            }[];
+        };
+        staticRoutes?: {
+            routes: {
+                destination: string;
+                subnetMask: string;
+                nextHop?: string;
+                outgoingInterface?: string;
+                administrativeDistance?: number;
+            }[];
+        };
+    }[];
 }
 
-export class DeviceConfigurationValidationError extends Error {
-    constructor(readonly errors: ConfigurationFieldError[]) {
-        super(errors.map((error) => error.message).join("\n"));
-        this.name = "DeviceConfigurationValidationError";
-    }
+const PORT_MODES: readonly string[] = ["auto", "access", "trunk"];
+const ROOT_ROLES: readonly string[] = ["auto", "primary", "secondary", "none"];
+const LACP_MODES: readonly string[] = ["active", "passive"];
+const MAX_VLANS = 256;
+
+const isInt = (value: unknown): value is number => typeof value === "number" && Number.isInteger(value);
+
+/** Nur die Struktur wird geprüft; Wertebereiche prüft validateDeviceConfiguration. */
+function isProtocolSettings(value: unknown): value is ProtocolSettings {
+    if (value === undefined) { return true; }
+    if (!value || typeof value !== "object") { return false; }
+    const data = value as Record<string, unknown>;
+    return (data.vlans === undefined || (Array.isArray(data.vlans) && data.vlans.length <= MAX_VLANS &&
+        data.vlans.every((vlan: unknown) => {
+            const item = vlan as Record<string, unknown> | null;
+            return !!item && isInt(item.id) && typeof item.name === "string" && item.name.length <= 64;
+        }))) &&
+        (data.nativeVlan === undefined || isInt(data.nativeVlan)) &&
+        (data.rootRole === undefined || ROOT_ROLES.includes(data.rootRole as string)) &&
+        (data.lacpMode === undefined || LACP_MODES.includes(data.lacpMode as string));
 }
 
-// ---------------------------------------------------------------------------
-// Typen und Konstanten
-// ---------------------------------------------------------------------------
+export { compatibleProtocols };
 
-type Report = (field: string, code: string, message: string) => void;
-type ProtocolConfiguration = DeviceConfiguration["protocols"][number];
+function isRipConfiguration(value: unknown): boolean {
+    if (!value || typeof value !== "object") { return false; }
 
-const MAX_LABEL_LENGTH = 128;
-const MAX_DOMAIN_LENGTH = 253;
-const MAX_USERNAME_LENGTH = 64;
-const MAX_PASSWORD_LENGTH = 128;
-const MAX_BANNER_LENGTH = 4096;
-const MAX_DESCRIPTION_LENGTH = 240;
-const MAX_OSPF_PROCESS_ID = 65535;
-const MAX_OSPF_AREA = 4294967295;
+    const config = value as Record<string, unknown>;
 
-const DOMAIN_LABEL = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$/;
-
-/** Alle Steuerzeichen (C0 und DEL). */
-const CONTROL_CHARACTERS = /[\x00-\x1f\x7f]/;
-/** Steuerzeichen außer Tab, LF und CR (für mehrzeilige Texte wie den Banner). */
-const CONTROL_CHARACTERS_EXCEPT_WHITESPACE = /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/;
-
-const PASSWORD_FIELDS = ["enableSecret", "consolePassword", "vtyPassword"] as const;
-
-// ---------------------------------------------------------------------------
-// Hilfsfunktionen
-// ---------------------------------------------------------------------------
-
-/** Die Daten kommen zur Laufzeit ungeprüft an (z. B. per Webview-Message): fehlende Arrays tolerieren. */
-function list<T>(value: readonly T[] | undefined | null): readonly T[] {
-    return Array.isArray(value) ? value : [];
+    return (config.version === undefined ||
+        config.version === 1 ||
+        config.version === 2) &&
+        (config.noAutoSummary === undefined ||
+            typeof config.noAutoSummary === "boolean") &&
+        Array.isArray(config.networks) &&
+        config.networks.length <= 1024 &&
+        config.networks.every((network: unknown) => {
+            if (!network || typeof network !== "object") { return false; }
+            const item = network as Record<string, unknown>;
+            return typeof item.address === "string" &&
+                item.address.length <= 32;
+        });
 }
 
-/** Getrimmter String; fehlende oder falsch typisierte Werte werden zu "". */
-function text(value: unknown): string {
-    return typeof value === "string" ? value.trim() : "";
+function isOspfConfiguration(value: unknown): boolean {
+    if (!value || typeof value !== "object") { return false; }
+
+    const config = value as Record<string, unknown>;
+
+    return Array.isArray(config.processes) &&
+        config.processes.length <= 32 &&
+        config.processes.every((process: unknown) => {
+            if (!process || typeof process !== "object") { return false; }
+            const item = process as Record<string, unknown>;
+
+            return Number.isInteger(item.processId) &&
+                (item.routerId === undefined ||
+                    (typeof item.routerId === "string" && item.routerId.length <= 32)) &&
+                Array.isArray(item.networks) &&
+                item.networks.length <= 1024 &&
+                item.networks.every((network: unknown) => {
+                    if (!network || typeof network !== "object") { return false; }
+                    const entry = network as Record<string, unknown>;
+
+                    return typeof entry.address === "string" &&
+                        entry.address.length <= 32 &&
+                        typeof entry.wildcardMask === "string" &&
+                        entry.wildcardMask.length <= 32 &&
+                        typeof entry.area === "string" &&
+                        entry.area.length <= 32;
+                }) &&
+                typeof item.passiveInterfaceDefault === "boolean" &&
+                !!item.passiveInterfaces &&
+                typeof item.passiveInterfaces === "object" &&
+                !Array.isArray(item.passiveInterfaces) &&
+                Object.entries(item.passiveInterfaces).every(
+                    ([name, passive]) =>
+                        name.length <= 128 && typeof passive === "boolean"
+                );
+        });
 }
 
-function isDeviceType(value: unknown): value is DeviceType {
-    return Object.values(DeviceType).includes(value as DeviceType);
-}
-
-function ipv4ToNumber(ip: string): number {
-    return ip.split(".").map(Number).reduce((result, octet) => result * 256 + octet, 0);
-}
-
-function hasLeadingZeros(ip: string): boolean {
-    return /(^|\.)0\d/.test(ip);
-}
-
-/** Wildcard-Masken müssen zusammenhängend sein (0.0.0.255, 0.0.15.255, ...). */
-function isValidWildcardMask(mask: string): boolean {
-    if (!isValidIpv4Address(mask)) {
+function isDhcpConfiguration(value: unknown): boolean {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
         return false;
     }
 
-    const wildcard = ipv4ToNumber(mask);
+    const config = value as Record<string, unknown>;
 
-    return ((wildcard & ((wildcard + 1) >>> 0)) >>> 0) === 0;
+    return Array.isArray(config.pools) &&
+        config.pools.length <= 1024 &&
+        config.pools.every((pool: unknown) => {
+            if (!pool || typeof pool !== "object") {
+                return false;
+            }
+
+            const item = pool as Record<string, unknown>;
+
+            return typeof item.name === "string" &&
+                item.name.length <= 128 &&
+                typeof item.interfaceName === "string" &&
+                item.interfaceName.length <= 128 &&
+                (item.dnsServer === undefined ||
+                    (typeof item.dnsServer === "string" &&
+                        item.dnsServer.length <= 32)) &&
+                (item.excludedAddresses === undefined ||
+                    (Array.isArray(item.excludedAddresses) &&
+                        item.excludedAddresses.length <= 1024 &&
+                        item.excludedAddresses.every(
+                            (address) =>
+                                typeof address === "string" &&
+                                address.length <= 32
+                        )));
+        });
 }
 
-/** OSPF-Area: Dezimalzahl 0–4294967295 oder IPv4-Schreibweise (z. B. 0.0.0.0). */
-function isValidOspfArea(area: string): boolean {
-    if (/^\d+$/.test(area)) {
-        return Number(area) <= MAX_OSPF_AREA;
+function isStaticRoutesConfiguration(value: unknown): boolean {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+        return false;
     }
 
-    return isValidIpv4Address(area) && !hasLeadingZeros(area);
+    const config = value as Record<string, unknown>;
+
+    return Array.isArray(config.routes) &&
+        config.routes.length <= 1024 &&
+        config.routes.every((route: unknown) => {
+            if (!route || typeof route !== "object") {
+                return false;
+            }
+
+            const item = route as Record<string, unknown>;
+
+            return typeof item.destination === "string" &&
+                item.destination.length <= 32 &&
+                typeof item.subnetMask === "string" &&
+                item.subnetMask.length <= 32 &&
+                (item.nextHop === undefined ||
+                    (typeof item.nextHop === "string" &&
+                        item.nextHop.length <= 32)) &&
+                (item.outgoingInterface === undefined ||
+                    (typeof item.outgoingInterface === "string" &&
+                        item.outgoingInterface.length <= 128)) &&
+                (item.administrativeDistance === undefined ||
+                    (Number.isInteger(item.administrativeDistance) &&
+                        (item.administrativeDistance as number) >= 1 &&
+                        (item.administrativeDistance as number) <= 255));
+        });
 }
 
-function isValidOspfRouterId(routerId: string): boolean {
-    return isValidIpv4Address(routerId) && !hasLeadingZeros(routerId) && routerId !== "0.0.0.0";
+/** Runtime validation at the Webview boundary; semantic checks follow before saving. */
+export function isDeviceConfiguration(value: unknown): value is DeviceConfiguration {
+    if (!value || typeof value !== "object") { return false; }
+    const data = value as Record<string, unknown>;
+    return typeof data.hostname === "string" && data.hostname.length <= 253 &&
+        ["label", "domainName", "username", "enableSecret", "consolePassword", "vtyPassword", "banner"]
+            .every((key) => data[key] === undefined || (typeof data[key] === "string" && (data[key] as string).length <= 8192)) &&
+        Array.isArray(data.interfaces) && data.interfaces.length <= 1024 &&
+        data.interfaces.every((item: unknown) => {
+            if (!item || typeof item !== "object") { return false; }
+            const iface = item as Record<string, unknown>;
+            return typeof iface.id === "string" && iface.id.length <= 128 &&
+                typeof iface.enabled === "boolean" &&
+                (iface.description === undefined || (typeof iface.description === "string" && iface.description.length <= 4096)) &&
+                (iface.layer === undefined || iface.layer === 2 || iface.layer === 3) &&
+                typeof iface.ipAddress === "string" && iface.ipAddress.length <= 32 &&
+                typeof iface.subnetMask === "string" && iface.subnetMask.length <= 32 &&
+                (iface.accessVlan === undefined || isInt(iface.accessVlan)) &&
+                (iface.portMode === undefined || PORT_MODES.includes(iface.portMode as string));
+        }) && Array.isArray(data.protocols) && data.protocols.length <= 32 &&
+        data.protocols.every((item: unknown) => {
+            if (!item || typeof item !== "object") { return false; }
+            const protocol = item as Record<string, unknown>;
+            return Object.values(ProtocolType).includes(protocol.type as ProtocolType) &&
+                typeof protocol.enabled === "boolean" &&
+                isProtocolSettings(protocol.settings) &&
+                (protocol.rip === undefined || isRipConfiguration(protocol.rip)) &&
+                (protocol.ospf === undefined || isOspfConfiguration(protocol.ospf)) &&
+                (protocol.dhcp === undefined || isDhcpConfiguration(protocol.dhcp)) &&
+                (protocol.staticRoutes === undefined || isStaticRoutesConfiguration(protocol.staticRoutes)) &&
+                (protocol.type === ProtocolType.Rip
+                    ? protocol.ospf === undefined
+                    : protocol.rip === undefined) &&
+                (protocol.type === ProtocolType.Ospf
+                    ? protocol.rip === undefined
+                    : protocol.ospf === undefined) &&
+                (protocol.type === ProtocolType.Dhcp
+                    ? protocol.rip === undefined &&
+                      protocol.ospf === undefined &&
+                      protocol.staticRoutes === undefined
+                    : protocol.dhcp === undefined) &&
+                (protocol.type === ProtocolType.StaticRoute
+                    ? protocol.rip === undefined &&
+                      protocol.ospf === undefined &&
+                      protocol.dhcp === undefined
+                    : protocol.staticRoutes === undefined);
+        });
 }
 
-function isValidDomainName(domain: string): boolean {
-    return domain.length <= MAX_DOMAIN_LENGTH && domain.split(".").every((part) => DOMAIN_LABEL.test(part));
+export function configurationOf(device: Device, connectedInterfaceIds: readonly string[] = []): DeviceConfiguration {
+    return {
+        label: device.label,
+        hostname: device.hostname,
+        domainName: device.domainName ?? "", username: device.username ?? "",
+        enableSecret: device.enableSecret ?? "", consolePassword: device.consolePassword ?? "",
+        vtyPassword: device.vtyPassword ?? "", banner: device.banner ?? "",
+        interfaces: device.interfaces.map((iface) => ({
+            id: iface.id, enabled: iface.enabled ?? connectedInterfaceIds.includes(iface.id),
+            ipAddress: iface.ipAddress ?? "", subnetMask: iface.subnetMask ?? "",
+            description: iface.description ?? "", layer: iface.layer ?? (device.type === "switch" ? 2 : 3),
+            ...(device.type === "switch" ? { accessVlan: iface.accessVlan, portMode: iface.portMode ?? "auto" } : {})
+        })),
+        protocols: (device.protocols ?? []).map((protocol) => {
+            const result: DeviceConfiguration["protocols"][number] = {
+                type: protocol.type,
+                enabled: protocol.enabled,
+                // H3b: VLAN-, STP- und EtherChannel-Eingaben aus dem Formular
+                ...(protocol.settings ? { settings: structuredClone(protocol.settings) } : {})
+            };
+
+            if (protocol.rip !== undefined) {
+                result.rip = {
+                    version: protocol.rip.version ?? 2,
+                    noAutoSummary: protocol.rip.noAutoSummary ?? true,
+                    networks: protocol.rip.networks.map((network) => ({
+                        address: network.address
+                    }))
+                };
+            }
+
+            if (protocol.ospf !== undefined) {
+                result.ospf = {
+                    processes: protocol.ospf.processes.map((process) => ({
+                        processId: process.processId,
+                        routerId: process.routerId,
+                        networks: process.networks.map((network) => ({
+                            address: network.address,
+                            wildcardMask: network.wildcardMask,
+                            area: network.area
+                        })),
+                        passiveInterfaceDefault: process.passiveInterfaceDefault,
+                        passiveInterfaces: { ...process.passiveInterfaces }
+                    }))
+                };
+            }
+
+            if (protocol.dhcp !== undefined) {
+                result.dhcp = {
+                    pools: protocol.dhcp.map((pool) => ({
+                        name: pool.name,
+                        interfaceName: pool.interfaceName,
+                        dnsServer: pool.dnsServer,
+                        excludedAddresses: pool.excludedAddresses
+                            ? [...pool.excludedAddresses]
+                            : undefined
+                    }))
+                };
+            }
+
+            if (protocol.staticRoutes !== undefined) {
+                result.staticRoutes = {
+                    routes: protocol.staticRoutes.map((route) => ({
+                        destination: route.destination,
+                        subnetMask: route.subnetMask,
+                        nextHop: route.nextHop,
+                        outgoingInterface: route.outgoingInterface,
+                        administrativeDistance: route.administrativeDistance
+                    }))
+                };
+            }
+
+            return result;
+        })
+    };
 }
 
-// ---------------------------------------------------------------------------
-// Gerät
-// ---------------------------------------------------------------------------
-
-/** Prüft das Gerätemodell selbst (nicht die Eingabe). Liefert den Gerätetyp, falls gültig. */
-function validateDeviceModel(device: Device, report: Report): DeviceType | undefined {
-    if (!device.id.trim()) {
-        report("deviceId", "device-id-empty", "Die Geräte-ID darf nicht leer sein.");
-    }
-
-    const deviceType = isDeviceType(device.type) ? device.type : undefined;
-    if (!deviceType) {
-        report("deviceId", "device-type-invalid", "Der Gerätetyp wird nicht unterstützt.");
-    }
-
-    const ids = new Set<string>();
-    const names = new Set<string>();
-
-    for (const iface of device.interfaces) {
-        const name = iface.name.trim();
-
-        if (!iface.id.trim() || ids.has(iface.id)) {
-            report("interfaces", "interface-id-invalid", "Interface-IDs müssen ausgefüllt und pro Gerät eindeutig sein.");
-        }
-        ids.add(iface.id);
-
-        if (!name || names.has(name)) {
-            report("interfaces", "interface-name-invalid", "Interface-Namen müssen ausgefüllt und pro Gerät eindeutig sein.");
-        }
-        names.add(name);
-
-        if (iface.type !== undefined && !Object.values(InterfaceType).includes(iface.type)) {
-            report("interfaces", "interface-type-invalid", `${iface.name}: Der Interfacetyp wird nicht unterstützt.`);
-        }
-    }
-
-    return deviceType;
+/** Rehydrates a persisted device as real H1c classes, including defaults for old files. */
+export function toNetworkDevice(device: Device, otherHostnames: string[] = [], connectedInterfaceIds: readonly string[] = []): NetworkDevice {
+    return buildConfiguredDevice(device, configurationOf(device, connectedInterfaceIds), otherHostnames);
 }
 
-// ---------------------------------------------------------------------------
-// Allgemeine Einstellungen
-// ---------------------------------------------------------------------------
-
-function validateGeneral(data: DeviceConfiguration, otherHostnames: readonly string[], report: Report): void {
-    const hostname = text(data.hostname);
-    const hostnameError = validateHostname(hostname);
-
-    if (hostnameError) {
-        report("hostname", "hostname-invalid", hostnameError);
-    } else if (isHostnameTaken(hostname, otherHostnames)) {
-        report("hostname", "hostname-taken", `Der Hostname "${hostname}" ist bereits vergeben.`);
+/** Builds a validated H1c model without mutating the stored device or its IDs. */
+export function buildConfiguredDevice(device: Device, data: DeviceConfiguration,
+    otherHostnames: string[]): NetworkDevice {
+    if (!isDeviceConfiguration(data)) {
+        throw new DeviceConfigurationValidationError([
+            { field: "configuration", code: "configuration-invalid", message: "Ungültige Konfigurationsdaten." }
+        ]);
     }
-
-    if (data.label !== undefined) {
-        const label = text(data.label);
-        if (!label || label.length > MAX_LABEL_LENGTH) {
-            report("label", "label-invalid", `Der Name muss ausgefüllt und darf höchstens ${MAX_LABEL_LENGTH} Zeichen lang sein.`);
-        }
-    }
-
-    const domain = text(data.domainName);
-    if (domain && !isValidDomainName(domain)) {
-        report("domainName", "domain-name-invalid", "Bitte einen gültigen Domain-Namen angeben, z. B. schule.at.");
-    }
-
-    const username = text(data.username);
-    if (username && (username.length > MAX_USERNAME_LENGTH || /\s/.test(username))) {
-        report("username", "username-invalid", `Der Benutzername darf höchstens ${MAX_USERNAME_LENGTH} Zeichen und keine Leerzeichen enthalten.`);
-    }
-
-    for (const key of PASSWORD_FIELDS) {
-        const value = data[key];
-        if (value && (value.length > MAX_PASSWORD_LENGTH || CONTROL_CHARACTERS.test(value))) {
-            report(key, "password-invalid", `Das Passwort darf höchstens ${MAX_PASSWORD_LENGTH} Zeichen und keine Steuerzeichen enthalten.`);
-        }
-    }
-
-    if (data.banner && (data.banner.length > MAX_BANNER_LENGTH || CONTROL_CHARACTERS_EXCEPT_WHITESPACE.test(data.banner))) {
-        report("banner", "banner-invalid", `Der Banner darf höchstens ${MAX_BANNER_LENGTH} Zeichen und keine Steuerzeichen außer Zeilenumbrüchen/Tabulatoren enthalten.`);
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Interfaces
-// ---------------------------------------------------------------------------
-
-interface AssignedSubnet {
-    name: string;
-    address: number;
-    start: number;
-    end: number;
-}
-
-function validateInterfaces(device: Device, data: DeviceConfiguration, report: Report): void {
-    const selectedIds = new Set<string>();
-    const assigned: AssignedSubnet[] = [];
-
-    list(data.interfaces).forEach((input, index) => {
-        const field = `interfaces.${index}`;
-        const original = device.interfaces.find((iface) => iface.id === input.id && iface.deviceId === device.id);
-
-        if (!original) {
-            report(`${field}.id`, "interface-not-found", "Das ausgewählte Interface gehört nicht zu diesem Gerät oder existiert nicht mehr.");
-        }
-
-        if (selectedIds.has(input.id)) {
-            report(`${field}.id`, "interface-duplicate", "Ein Interface darf nur einmal ausgewählt werden.");
-            return;
-        }
-        selectedIds.add(input.id);
-
-        const name = original?.name ?? input.id;
-
-        if (input.description && (input.description.length > MAX_DESCRIPTION_LENGTH || CONTROL_CHARACTERS.test(input.description))) {
-            report(`${field}.description`, "description-invalid", `${name}: Die Beschreibung darf höchstens ${MAX_DESCRIPTION_LENGTH} Zeichen und keine Steuerzeichen enthalten.`);
-        }
-
-        if (input.layer !== undefined && input.layer !== 2 && input.layer !== 3) {
-            report(`${field}.layer`, "layer-invalid", `${name}: Bitte Layer 2 oder Layer 3 auswählen.`);
-        }
-
-        validateInterfaceAddress(input, field, name, assigned, report);
+    const errors = validateDeviceConfiguration(device, data, otherHostnames);
+    if (errors.length) { throw new DeviceConfigurationValidationError(errors); }
+    const hostname = data.hostname.trim();
+    const model = new NetworkDevice({
+        id: device.id, hostname, type: device.type as DeviceType,
+        domainName: data.domainName?.trim() || undefined, username: data.username?.trim() || undefined,
+        enableSecret: data.enableSecret || undefined, consolePassword: data.consolePassword || undefined,
+        vtyPassword: data.vtyPassword || undefined, banner: data.banner || undefined
     });
-
-    if (device.interfaces.some((iface) => !selectedIds.has(iface.id))) {
-        report("interfaces", "interfaces-incomplete", "Die Interfaceauswahl ist unvollständig oder veraltet. Bitte das Formular erneut öffnen.");
+    for (const input of data.interfaces) {
+        const original = device.interfaces.find((iface) => iface.id === input.id)!;
+        const ip = input.ipAddress.trim();
+        const mask = input.subnetMask.trim();
+        model.addInterface(new NetworkInterface({
+            id: original.id, name: original.name, type: original.type ?? interfaceTypeOf(original.name),
+            enabled: input.enabled, ipAddress: ip || undefined, subnetMask: mask || undefined,
+            description: input.description?.trim() || undefined,
+            layer: input.layer ?? original.layer ?? (device.type === "switch" ? 2 : 3)
+        }));
     }
-}
-
-function validateInterfaceAddress(
-    input: DeviceConfiguration["interfaces"][number],
-    field: string,
-    name: string,
-    assigned: AssignedSubnet[],
-    report: Report
-): void {
-    const ip = text(input.ipAddress);
-    const mask = text(input.subnetMask);
-    const ipValid = ip !== "" && isValidIpv4Address(ip);
-    const maskValid = mask !== "" && isValidSubnetMask(mask);
-
-    if (ip && !mask) {
-        report(`${field}.subnetMask`, "subnet-mask-required", `${name}: Bitte zur IP-Adresse eine Subnetzmaske angeben.`);
-    }
-    if (mask && !ip) {
-        report(`${field}.ipAddress`, "ip-address-required", `${name}: Bitte zur Subnetzmaske eine IP-Adresse angeben.`);
-    }
-    if (ip && !ipValid) {
-        report(`${field}.ipAddress`, "ip-address-invalid", `${name}: Ungültige IPv4-Adresse. Beispiel: 192.168.1.10.`);
-    }
-    if (mask && !maskValid) {
-        report(`${field}.subnetMask`, "subnet-mask-invalid", `${name}: Ungültige Subnetzmaske; Netzbits müssen zusammenhängend sein (z. B. 255.255.255.0).`);
-    }
-
-    if (input.layer === 2) {
-        if (ip || mask) {
-            report(`${field}.ipAddress`, "layer2-address-not-allowed", `${name}: Ein Layer-2-Interface kann keine IP-Adresse haben.`);
-        }
-        return;
-    }
-
-    if (!ipValid || !maskValid) {
-        return;
-    }
-
-    const address = ipv4ToNumber(ip);
-    const subnetMask = ipv4ToNumber(mask);
-    const hostMask = (~subnetMask) >>> 0;
-    const start = (address & subnetMask) >>> 0;
-    const end = (start | hostMask) >>> 0;
-    const firstOctet = address >>> 24;
-
-    if (firstOctet === 0 || firstOctet === 127 || firstOctet >= 224) {
-        report(`${field}.ipAddress`, "ip-address-reserved", `${name}: Diese Adresse ist reserviert und kann keinem Interface zugewiesen werden.`);
-        return;
-    }
-
-    // /31 und /32 haben keine Netzwerk- bzw. Broadcast-Adresse im klassischen Sinn.
-    if (hostMask > 1) {
-        if (address === start) {
-            report(`${field}.ipAddress`, "ip-address-is-network", `${name}: Die Adresse ist die Netzwerkadresse des Subnetzes und keine gültige Host-Adresse.`);
-            return;
-        }
-        if (address === end) {
-            report(`${field}.ipAddress`, "ip-address-is-broadcast", `${name}: Die Adresse ist die Broadcast-Adresse des Subnetzes und keine gültige Host-Adresse.`);
-            return;
-        }
-    }
-
-    const sameAddress = assigned.find((other) => other.address === address);
-    if (sameAddress) {
-        report(`${field}.ipAddress`, "ip-address-duplicate", `${name}: Die IP-Adresse wird bereits von ${sameAddress.name} verwendet.`);
-        return;
-    }
-
-    const overlapping = assigned.find((other) => start <= other.end && other.start <= end);
-    if (overlapping) {
-        report(`${field}.ipAddress`, "subnet-overlap", `${name}: Das Subnetz überschneidet sich mit dem Subnetz von ${overlapping.name}.`);
-        return;
-    }
-
-    assigned.push({ name, address, start, end });
-}
-
-// ---------------------------------------------------------------------------
-// Protokolle
-// ---------------------------------------------------------------------------
-
-function validateProtocols(
-    device: Device,
-    deviceType: DeviceType | undefined,
-    data: DeviceConfiguration,
-    report: Report
-): void {
-    const seen = new Set<ProtocolType>();
-
-    list(data.protocols).forEach((protocol, index) => {
-        const field = `protocols.${index}`;
-
-        if (!Object.values(ProtocolType).includes(protocol.type)) {
-            report(`${field}.type`, "protocol-unknown", "Das ausgewählte Protokoll wird nicht unterstützt.");
-        } else if (deviceType && !compatibleProtocols[deviceType].includes(protocol.type)) {
-            report(`${field}.type`, "protocol-incompatible", `Das Protokoll ${protocol.type.toUpperCase()} ist für dieses Gerät nicht verfügbar.`);
-        }
-
-        if (seen.has(protocol.type)) {
-            report(`${field}.type`, "protocol-duplicate", "Ein Protokoll darf nur einmal ausgewählt werden.");
-        }
-        seen.add(protocol.type);
-
-        if (!protocol.enabled) {
-            return;
-        }
+    for (const protocol of data.protocols) {
+        const id = device.protocols?.find(
+            (item) => item.type === protocol.type
+        )?.id ?? `${device.id}:${protocol.type}`;
 
         if (protocol.type === ProtocolType.Rip) {
-            validateRip(protocol, field, report);
+            const rip = new RipProtocol(id);
+            if (protocol.rip !== undefined) {
+                rip.version = protocol.rip.version ?? 2;
+                rip.noAutoSummary = protocol.rip.noAutoSummary ?? true;
+                rip.networks.push(...protocol.rip.networks);
+            }
+            if (protocol.enabled) {
+                rip.enable();
+            } else {
+                rip.disable();
+            }
+            model.addProtocol(rip);
         } else if (protocol.type === ProtocolType.Ospf) {
-            validateOspf(protocol, field, report);
-        }
+            const ospf = new OspfProtocol(id);
+            if (protocol.ospf !== undefined) {
+                ospf.processes.push(
+                    ...protocol.ospf.processes.map((process) => ({
+                        ...process,
+                        networks: process.networks.map((network) => ({ ...network })),
+                        passiveInterfaces: { ...process.passiveInterfaces }
+                    }))
+                );
+            }
+            if (protocol.enabled) {
+                ospf.enable();
+            } else {
+                ospf.disable();
+            }
+            model.addProtocol(ospf);
+            } else if (protocol.type === ProtocolType.Dhcp) {
+            const dhcp = new DhcpProtocol(id);
 
-        // Statische Routen prüfen
-        if (protocol.type === ProtocolType.StaticRoute && protocol.enabled) {
-            const routes = protocol.staticRoutes?.routes ?? [];
-
-            if (routes.length === 0) {
-                report(
-                    `${field}.staticRoutes.routes`,
-                    "static-route-required",
-                    "Für statische Routen muss mindestens eine Route vorhanden sein."
+            if (protocol.dhcp !== undefined) {
+                dhcp.pools.push(
+                    ...protocol.dhcp.pools.map((pool) => ({
+                        ...pool,
+                        excludedAddresses: pool.excludedAddresses
+                            ? [...pool.excludedAddresses]
+                            : undefined
+                    }))
                 );
             }
 
-            routes.forEach((route, routeIndex) => {
-                const routeField = `${field}.staticRoutes.routes.${routeIndex}`;
+            if (protocol.enabled) {
+                dhcp.enable();
+            } else {
+                dhcp.disable();
+            }
 
-                if (!isValidIpv4Address(route.destination)) {
-                    report(
-                        `${routeField}.destination`,
-                        "static-route-destination-invalid",
-                        "Bitte eine gültige IPv4-Zieladresse angeben."
-                    );
-                }
+            model.addProtocol(dhcp);
+        } else if (protocol.type === ProtocolType.StaticRoute) {
+            const staticRoutes = new StaticRouteProtocol(id);
 
-                if (!isValidSubnetMask(route.subnetMask)) {
-                    report(
-                        `${routeField}.subnetMask`,
-                        "static-route-mask-invalid",
-                        "Bitte eine gültige Subnetzmaske angeben."
-                    );
-                }
+            if (protocol.staticRoutes !== undefined) {
+                staticRoutes.routes.push(
+                    ...protocol.staticRoutes.routes.map((route) => ({
+                        ...route
+                    }))
+                );
+            }
 
-                if (
-                    route.nextHop !== undefined &&
-                    route.nextHop.trim() !== "" &&
-                    !isValidIpv4Address(route.nextHop)
-                ) {
-                    report(
-                        `${routeField}.nextHop`,
-                        "static-route-next-hop-invalid",
-                        "Bitte eine gültige IPv4-Adresse für den Next Hop angeben."
-                    );
-                }
+            if (protocol.enabled) {
+                staticRoutes.enable();
+            } else {
+                staticRoutes.disable();
+            }
 
-                if (
-                    route.outgoingInterface !== undefined &&
-                    route.outgoingInterface.trim() !== "" &&
-                    !device.interfaces.some(
-                        (iface) => iface.name === route.outgoingInterface
-                    )
-                ) {
-                    report(
-                        `${routeField}.outgoingInterface`,
-                        "static-route-interface-invalid",
-                        "Das ausgewählte Ausgangsinterface gehört nicht zu diesem Gerät."
-                    );
-                }
-
-                if (
-                    (!route.nextHop || route.nextHop.trim() === "") &&
-                    (!route.outgoingInterface || route.outgoingInterface.trim() === "")
-                ) {
-                    report(
-                        `${routeField}.nextHop`,
-                        "static-route-target-required",
-                        "Bitte entweder einen Next Hop oder ein Ausgangsinterface angeben."
-                    );
-                }
-
-                if (
-                    route.administrativeDistance !== undefined &&
-                    (
-                        !Number.isInteger(route.administrativeDistance) ||
-                        route.administrativeDistance < 1 ||
-                        route.administrativeDistance > 255
-                    )
-                ) {
-                    report(
-                        `${routeField}.administrativeDistance`,
-                        "static-route-distance-invalid",
-                        "Die Administrative Distanz muss eine ganze Zahl zwischen 1 und 255 sein."
-                    );
-                }
-            });
-        }
-    });
-}
-
-function validateRip(protocol: ProtocolConfiguration, field: string, report: Report): void {
-    const networks = list(protocol.rip?.networks);
-
-    if (networks.length === 0) {
-        report(`${field}.rip.networks`, "rip-network-required", "Für RIP muss mindestens eine Netzwerkadresse angegeben werden.");
-        return;
-    }
-
-    const seen = new Set<string>();
-    let hasDuplicate = false;
-
-    networks.forEach((network, index) => {
-        const address = text(network.address);
-
-        if (!isValidIpv4Address(address)) {
-            report(`${field}.rip.networks.${index}.address`, "rip-network-invalid", "Bitte eine gültige IPv4-Netzwerkadresse angeben.");
-        }
-
-        if (seen.has(address)) {
-            hasDuplicate = true;
-        }
-        seen.add(address);
-    });
-
-    if (hasDuplicate) {
-        report(`${field}.rip.networks`, "rip-network-duplicate", "Ein RIP-Netzwerk wurde mehrfach angegeben.");
-    }
-}
-
-function validateOspf(protocol: ProtocolConfiguration, field: string, report: Report): void {
-    const processes = list(protocol.ospf?.processes);
-
-    if (processes.length === 0) {
-        report(`${field}.ospf.processes`, "ospf-process-required", "Für OSPF muss mindestens ein Prozess vorhanden sein.");
-        return;
-    }
-
-    const processIds = new Set<number>();
-
-    processes.forEach((ospfProcess, processIndex) => {
-        const processField = `${field}.ospf.processes.${processIndex}`;
-
-        const routerId = text(ospfProcess.routerId);
-        if (routerId && !isValidOspfRouterId(routerId)) {
-            report(`${processField}.routerId`, "ospf-router-id-invalid", "Bitte eine gültige OSPF Router-ID ohne führende Nullen angeben (nicht 0.0.0.0).");
-        }
-
-        const processId = ospfProcess.processId;
-        if (!Number.isInteger(processId) || processId < 1 || processId > MAX_OSPF_PROCESS_ID) {
-            report(`${processField}.processId`, "ospf-process-id-invalid", `Die OSPF Process ID muss eine ganze Zahl zwischen 1 und ${MAX_OSPF_PROCESS_ID} sein.`);
-        } else if (processIds.has(processId)) {
-            report(`${processField}.processId`, "ospf-process-id-duplicate", `Die OSPF Process ID ${processId} wurde mehrfach vergeben.`);
+            model.addProtocol(staticRoutes);
         } else {
-            processIds.add(processId);
+            model.addProtocol(new NetworkProtocol({
+                id,
+                ...protocol
+            }));
         }
-
-        validateOspfNetworks(ospfProcess.networks, processField, report);
-    });
+    }
+    return model;
 }
 
-function validateOspfNetworks(
-    networks: readonly { address: string; wildcardMask: string; area: string }[] | undefined,
-    processField: string,
-    report: Report
-): void {
-    const entries = list(networks);
-
-    if (entries.length === 0) {
-        report(`${processField}.networks`, "ospf-network-required", "Für jeden OSPF-Prozess muss mindestens ein Netzwerk angegeben werden.");
-        return;
-    }
-
-    const seen = new Set<string>();
-    let hasDuplicate = false;
-
-    entries.forEach((network, index) => {
-        const networkField = `${processField}.networks.${index}`;
-        const address = text(network.address);
-        const wildcardMask = text(network.wildcardMask);
-        const area = text(network.area);
-
-        const addressValid = isValidIpv4Address(address);
-        const wildcardValid = isValidWildcardMask(wildcardMask);
-
-        if (!addressValid) {
-            report(`${networkField}.address`, "ospf-network-invalid", "Bitte eine gültige IPv4-Netzwerkadresse angeben.");
-        }
-
-        if (!wildcardValid) {
-            report(`${networkField}.wildcardMask`, "ospf-wildcard-invalid", "Bitte eine gültige zusammenhängende OSPF-Wildcard-Maske angeben.");
-        }
-
-        if (!isValidOspfArea(area)) {
-            report(`${networkField}.area`, "ospf-area-invalid", "Die OSPF Area muss eine Zahl zwischen 0 und 4294967295 oder im Format 0.0.0.0 angegeben werden.");
-        }
-
-        const key = `${address}|${wildcardMask}|${area}`;
-        if (seen.has(key)) {
-            hasDuplicate = true;
-        }
-        seen.add(key);
-    });
-
-    if (hasDuplicate) {
-        report(`${processField}.networks`, "ospf-network-duplicate", "Ein OSPF-Netzwerk wurde mehrfach mit derselben Wildcard-Maske und Area angegeben.");
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Einstiegspunkt
-// ---------------------------------------------------------------------------
-
-/** Pure semantic validation: collect all field errors, never mutate data or access VS Code. */
-export function validateDeviceConfiguration(
-    device: Device | undefined,
-    data: DeviceConfiguration,
-    otherHostnames: readonly string[] = []
-): ConfigurationFieldError[] {
-    const errors: ConfigurationFieldError[] = [];
-    const report: Report = (field, code, message) => {
-        errors.push({ field, code, message });
-    };
-
-    if (!device) {
-        report("deviceId", "device-not-found", "Das Gerät existiert nicht mehr. Bitte die Topologie erneut öffnen.");
-        return errors;
-    }
-
-    const deviceType = validateDeviceModel(device, report);
-    validateGeneral(data, otherHostnames, report);
-    validateInterfaces(device, data, report);
-    validateProtocols(device, deviceType, data, report);
-    return errors;
+function interfaceTypeOf(name: string): InterfaceType {
+    if (/^(gigabit|gi)/i.test(name)) { return InterfaceType.GigabitEthernet; }
+    if (/^(fast|fa)/i.test(name)) { return InterfaceType.FastEthernet; }
+    if (/^(loopback|lo)/i.test(name)) { return InterfaceType.Loopback; }
+    if (/^vlan/i.test(name)) { return InterfaceType.Vlan; }
+    return InterfaceType.Ethernet;
 }

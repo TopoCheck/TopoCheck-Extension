@@ -1,4 +1,4 @@
-import type { Device } from "../modules/topology/models";
+import type { Device, PortMode, ProtocolSettings } from "../modules/topology/models";
 import { DeviceType } from "../models/deviceType";
 import { ProtocolType } from "../models/protocolType";
 import { compatibleProtocols, configurationOf, DeviceConfiguration } from "../shared/deviceConfiguration";
@@ -7,6 +7,25 @@ import type { ExtensionToWebviewMessage } from "../shared/protocol";
 import { DEVICE_TYPE_LABEL, iconHref } from "./icons";
 import { svgElement } from "./svg";
 import { vscodeApi } from "./vscodeApi";
+import { defaultSettings, isProtocolComplete } from "../shared/switchingSettings";
+
+const PROTOCOL_LABEL: Partial<Record<ProtocolType, string>> = {
+    [ProtocolType.Vlan]: "VLAN", [ProtocolType.Stp]: "STP", [ProtocolType.Rstp]: "RSTP",
+    [ProtocolType.EtherChannel]: "EtherChannel"
+};
+const MIN_WIDTH = 280;
+/** Diese Protokolle haben eigene Formulare (Routing, DHCP); alle anderen nutzen die aufklappbare Protokollzeile. */
+const ROUTING_PROTOCOLS: readonly ProtocolType[] = [ProtocolType.Rip, ProtocolType.Ospf, ProtocolType.Dhcp, ProtocolType.StaticRoute];
+
+export interface FormWidthStore { initialWidth?: number; saveWidth(width: number): void }
+
+/** Ein Protokolleintrag im Formular; read() liefert die aktuellen Eingaben. */
+interface ProtocolControl {
+    type: ProtocolType;
+    selected: HTMLInputElement;
+    read(): ProtocolSettings | undefined;
+    refresh(): void;
+}
 
 type FieldControl = HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement;
 type FormControl = FieldControl | HTMLButtonElement;
@@ -27,8 +46,10 @@ export class DeviceConfigurationForm {
     private showAllInterfaces: HTMLInputElement | undefined;
     private emptyInterfaces: HTMLElement | undefined;
     private interfaceFilterInfo: HTMLElement | undefined;
+    private protocolTypes: ProtocolType[] = [];
+    private readonly resizer = document.createElement("div");
 
-    constructor(private readonly root: HTMLElement) {
+    constructor(private readonly root: HTMLElement, private readonly widthStore?: FormWidthStore) {
         this.dialog.className = "device-configuration";
         this.dialog.setAttribute("aria-labelledby", "device-configuration-title");
         this.dialog.setAttribute("aria-modal", "false");
@@ -40,6 +61,35 @@ export class DeviceConfigurationForm {
             this.root.classList.remove("configuration-open");
         });
         (root.querySelector(".workspace") ?? root).append(this.dialog);
+        this.setupResizer();
+    }
+
+    /** Linker Rand ist ziehbar; die Breite bleibt pro Topologieansicht gespeichert. */
+    private setupResizer(): void {
+        this.resizer.className = "configuration-resizer";
+        this.resizer.setAttribute("role", "separator");
+        this.resizer.setAttribute("aria-orientation", "vertical");
+        this.resizer.setAttribute("aria-label", "Formularbreite ändern");
+        if (this.widthStore?.initialWidth) { this.applyWidth(this.widthStore.initialWidth); }
+        this.resizer.addEventListener("pointerdown", (event) => {
+            event.preventDefault();
+            this.resizer.setPointerCapture(event.pointerId);
+            const right = this.dialog.getBoundingClientRect().right;
+            const move = (moveEvent: PointerEvent) => this.applyWidth(right - moveEvent.clientX);
+            const stop = () => {
+                this.resizer.removeEventListener("pointermove", move);
+                this.widthStore?.saveWidth(this.dialog.getBoundingClientRect().width);
+            };
+            this.resizer.addEventListener("pointermove", move);
+            this.resizer.addEventListener("pointerup", stop, { once: true });
+        });
+    }
+
+    private applyWidth(width: number): void {
+        // Mindestens 200 px Zeichenfläche bleiben sichtbar.
+        const max = Math.max(MIN_WIDTH, this.root.clientWidth - 200);
+        const clamped = Math.round(Math.min(Math.max(width, MIN_WIDTH), max));
+        this.dialog.style.setProperty("--configuration-width", `${clamped}px`);
     }
 
     receive(message: ExtensionToWebviewMessage): void {
@@ -119,6 +169,11 @@ export class DeviceConfigurationForm {
 
     private showValidationErrors(errors: ConfigurationFieldError[]): void {
         this.clearValidationErrors();
+        // Server-Pfade "protocols.<n>" beziehen sich auf die abgeschickte Liste, das Formular kennt Typen.
+        errors = errors.map((issue) => ({
+            ...issue, field: issue.field.replace(/^protocols\.(\d+)/,
+                (match, index: string) => this.protocolTypes[Number(index)] ? `protocol:${this.protocolTypes[Number(index)]}` : match)
+        }));
         for (const issue of errors) {
             const field = this.fields.get(issue.field);
             if (field) {
@@ -248,6 +303,17 @@ export class DeviceConfigurationForm {
         this.interfaceFilterInfo.className = "configuration-note";
         this.showAllInterfaces.setAttribute("aria-describedby", this.interfaceFilterInfo.id);
         interfaces.append(this.interfaceFilterInfo);
+        const isSwitch = device.type === DeviceType.Switch;
+        let vlanList: () => { id: number; name: string }[] = () => [];
+        let vlanSelected = () => false;
+        const switchPorts: { mode: HTMLSelectElement; vlan: HTMLSelectElement; wrapper: HTMLElement }[] = [];
+        const refreshSwitchPorts = () => {
+            for (const { mode, vlan, wrapper } of switchPorts) {
+                wrapper.hidden = !vlanSelected();
+                fillVlanSelect(vlan, vlanList());
+                vlan.disabled = mode.value === "trunk";
+            }
+        };
         const controls = device.interfaces.map((iface, index) => {
             const card = document.createElement("section"); card.className = "configuration-interface-card";
             const cardHeader = document.createElement("header"); cardHeader.className = "configuration-interface-header";
@@ -274,9 +340,23 @@ export class DeviceConfigurationForm {
                 this.validatedField(`interfaces.${index}.subnetMask`, "Subnetzmaske", mask),
                 this.validatedField(`interfaces.${index}.description`, "Beschreibung", description),
                 field("Aktiviert", enabled));
+            let switchport: { mode: HTMLSelectElement; vlan: HTMLSelectElement } | undefined;
+            if (isSwitch) {
+                const mode = select([["auto", "Automatisch (nach Gegenstelle)"], ["access", "Access"], ["trunk", "Trunk"]],
+                    draft.interfaces[index].portMode ?? "auto");
+                const vlan = document.createElement("select");
+                vlan.dataset.value = String(draft.interfaces[index].accessVlan ?? "");
+                mode.addEventListener("change", refreshSwitchPorts);
+                const wrapper = document.createElement("div"); wrapper.className = "configuration-switchport";
+                wrapper.append(this.validatedField(`interfaces.${index}.portMode`, "Port-Modus", mode),
+                    this.validatedField(`interfaces.${index}.accessVlan`, "Access-VLAN", vlan));
+                card.append(wrapper);
+                switchPorts.push({ mode, vlan, wrapper });
+                switchport = { mode, vlan };
+            }
             interfaces.append(card);
             this.interfaceCards.set(iface.id, { card, status, enabled, edited: false });
-            return { id: iface.id, enabled, ip, mask, description };
+            return { id: iface.id, enabled, ip, mask, description, switchport };
         });
         this.emptyInterfaces = document.createElement("p");
         this.emptyInterfaces.className = "configuration-note";
@@ -286,8 +366,33 @@ export class DeviceConfigurationForm {
 
 
         const protocols = section("Protokolle");
+        const deviceProtocols: readonly ProtocolType[] = compatibleProtocols[device.type as DeviceType];
+        // H3b: VLAN, STP, RSTP, EtherChannel als Zeile "☐ Name … Aktiviert" mit aufklappbarem Formular
+        const protocolControls: ProtocolControl[] = deviceProtocols.filter((type) => !ROUTING_PROTOCOLS.includes(type)).map((type: ProtocolType) => {
+            const saved = draft.protocols.find((item) => item.type === type);
+            const settings = saved?.settings ?? defaultSettings(type);
+            const item = this.protocolItem(type, saved !== undefined, settings);
+            protocols.append(item.element);
+            return item.control;
+        });
+        const vlanControl = protocolControls.find((item) => item.type === ProtocolType.Vlan);
+        if (vlanControl) {
+            vlanList = () => vlanControl.read()?.vlans ?? [];
+            vlanSelected = () => vlanControl.selected.checked;
+            protocols.addEventListener("input", refreshSwitchPorts);
+            protocols.addEventListener("change", refreshSwitchPorts);
+        }
+        // Ein Switch läuft immer nur in einem STP-Modus.
+        const stp = protocolControls.find((item) => item.type === ProtocolType.Stp);
+        const rstp = protocolControls.find((item) => item.type === ProtocolType.Rstp);
+        if (stp && rstp) {
+            stp.selected.addEventListener("change", () => { if (stp.selected.checked) { setChecked(rstp.selected, false); } });
+            rstp.selected.addEventListener("change", () => { if (rstp.selected.checked) { setChecked(stp.selected, false); } });
+        }
+        refreshSwitchPorts();
 
-        const protocolControls = compatibleProtocols[device.type as DeviceType].map((type: ProtocolType, protocolIndex: number) => {
+        // Protokolle mit eigenen Formularen (RIP, OSPF, DHCP, statische Routen)
+        const routingControls = deviceProtocols.filter((type) => ROUTING_PROTOCOLS.includes(type)).map((type: ProtocolType) => {
             const saved = draft.protocols.find((item) => item.type === type);
             const savedProcesses = saved?.ospf?.processes ?? [];
 
@@ -507,7 +612,7 @@ export class DeviceConfigurationForm {
                         networkGroup.append(
                             heading,
                             this.validatedField(
-                                `protocols.${protocolIndex}.rip.networks.${index}.address`,
+                                `protocol:${type}.rip.networks.${index}.address`,
                                 "Netzwerkadresse *",
                                 address
                             )
@@ -575,12 +680,12 @@ export class DeviceConfigurationForm {
 
                 ospfSettings.append(
                     this.validatedField(
-                        `protocols.${protocolIndex}.ospf.processes.0.processId`,
+                        `protocol:${type}.ospf.processes.0.processId`,
                         "Process ID (Standard: 1)",
                         processId
                     ),
                     this.validatedField(
-                        `protocols.${protocolIndex}.ospf.processes.0.routerId`,
+                        `protocol:${type}.ospf.processes.0.routerId`,
                         "Router ID (optional)",
                         routerId
                     )
@@ -643,17 +748,17 @@ export class DeviceConfigurationForm {
                         networkGroup.append(
                             heading,
                             this.validatedField(
-                                `protocols.${protocolIndex}.ospf.processes.0.networks.${index}.address`,
+                                `protocol:${type}.ospf.processes.0.networks.${index}.address`,
                                 "Netzwerkadresse *",
                                 address
                             ),
                             this.validatedField(
-                                `protocols.${protocolIndex}.ospf.processes.0.networks.${index}.wildcardMask`,
+                                `protocol:${type}.ospf.processes.0.networks.${index}.wildcardMask`,
                                 "Wildcard-Maske *",
                                 wildcardMask
                             ),
                             this.validatedField(
-                                `protocols.${protocolIndex}.ospf.processes.0.networks.${index}.area`,
+                                `protocol:${type}.ospf.processes.0.networks.${index}.area`,
                                 "Area *",
                                 area
                             ),
@@ -887,7 +992,7 @@ export class DeviceConfigurationForm {
             };
         });
 
-        if (!protocolControls.length) {
+        if (!deviceProtocols.length) {
             protocols.append(document.createTextNode("Keine Protokolle für diesen Gerätetyp."));
         }
 
@@ -907,11 +1012,17 @@ export class DeviceConfigurationForm {
                 domainName: domain.value.trim(), username: username.value.trim(),
                 enableSecret: enableSecret.value, consolePassword: consolePassword.value,
                 vtyPassword: vtyPassword.value, banner: banner.value,
-                interfaces: controls.map(({ id, enabled, ip, mask, description }, index) => ({
+                interfaces: controls.map(({ id, enabled, ip, mask, description, switchport }, index) => ({
                     id, enabled: enabled.checked, ipAddress: ip.value.trim(), subnetMask: mask.value.trim(),
-                    description: description.value.trim(), layer: draft.interfaces[index].layer
+                    description: description.value.trim(), layer: draft.interfaces[index].layer,
+                    ...(switchport ? {
+                        portMode: switchport.mode.value as PortMode,
+                        // Trunks haben kein Access-VLAN; leer = VLAN 1.
+                        accessVlan: vlanSelected() && switchport.mode.value !== "trunk" && switchport.vlan.value
+                            ? Number(switchport.vlan.value) : undefined
+                    } : {})
                 })),
-                protocols: protocolControls.map(({
+                protocols: [...routingControls.map(({
                     type,
                     enabled,
                     ripNetworkControls,
@@ -993,8 +1104,13 @@ export class DeviceConfigurationForm {
                             }
                         }
                         : {})
-                }))
+                })),
+                ...protocolControls.filter((item) => item.selected.checked).map(({ type, read }) => {
+                    const settings = read();
+                    return { type, enabled: isProtocolComplete(type, settings), ...(settings ? { settings } : {}) };
+                })]
             };
+            this.protocolTypes = configuration.protocols.map((item) => item.type);
             const errors = validateDeviceConfiguration(device, configuration, otherHostnames);
             if (errors.length) { this.showValidationErrors(errors); return; }
             this.clearValidationErrors(); this.pending = true;
@@ -1005,10 +1121,117 @@ export class DeviceConfigurationForm {
             this.submit!.textContent = "Wird gespeichert …";
             vscodeApi.postMessage({ type: "configureDevice", deviceId: device.id, configuration });
         });
-        this.dialog.replaceChildren(form);
+        this.dialog.replaceChildren(this.resizer, form);
         this.root.classList.add("configuration-open");
         if (!this.dialog.open) { this.dialog.show(); }
         label.focus({ preventScroll: true });
+    }
+
+    /** Zeile "☐ VLAN … Aktiviert" mit aufklappbarem Formular darunter. */
+    private protocolItem(type: ProtocolType, checked: boolean, settings: ProtocolSettings | undefined) {
+        const element = document.createElement("div"); element.className = "configuration-protocol";
+        const row = document.createElement("div"); row.className = "configuration-protocol-row";
+        const selected = input("checkbox"); selected.checked = checked;
+        selected.setAttribute("aria-label", `${PROTOCOL_LABEL[type] ?? type.toUpperCase()} verwenden`);
+        const toggle = button(PROTOCOL_LABEL[type] ?? type.toUpperCase()); toggle.className = "configuration-protocol-toggle";
+        const badge = document.createElement("span"); badge.className = "configuration-protocol-badge";
+        const panel = document.createElement("div"); panel.className = "configuration-protocol-panel";
+        panel.id = `protocol-panel-${type}`; panel.hidden = true;
+        toggle.setAttribute("aria-controls", panel.id);
+        row.append(selected, toggle, badge);
+
+        const body = this.protocolPanel(type, settings);
+        panel.append(body.element);
+        const refresh = () => {
+            const complete = isProtocolComplete(type, body.read());
+            badge.textContent = !selected.checked ? "" : complete ? "Aktiviert" : "Unvollständig";
+            badge.dataset.state = complete ? "complete" : "incomplete";
+        };
+        let expanded = false;
+        const expand = (open: boolean) => { expanded = open; panel.hidden = !open; toggle.setAttribute("aria-expanded", String(open)); };
+        toggle.addEventListener("click", () => expand(!expanded));
+        // Auswählen klappt die Eingaben auf, Abwählen wieder zu.
+        selected.addEventListener("change", () => { expand(selected.checked); refresh(); });
+        panel.addEventListener("input", refresh);
+        panel.addEventListener("change", refresh);
+        expand(false); refresh();
+        element.append(row, panel);
+        return { element, control: { type, selected, read: body.read, refresh } satisfies ProtocolControl };
+    }
+
+    private protocolPanel(type: ProtocolType, settings: ProtocolSettings | undefined): { element: HTMLElement; read(): ProtocolSettings | undefined } {
+        const element = document.createElement("div");
+        const hint = (text: string) => { const p = document.createElement("p"); p.className = "configuration-note"; p.textContent = text; return p; };
+        switch (type) {
+            case ProtocolType.Vlan: return this.vlanPanel(element, settings, hint);
+            case ProtocolType.Stp:
+            case ProtocolType.Rstp: {
+                const role = select([["auto", "Automatisch (empfohlen)"], ["primary", "Primary Root"],
+                ["secondary", "Secondary Root (Backup)"], ["none", "Keine Root"]], settings?.rootRole ?? "auto");
+                element.append(hint(type === ProtocolType.Rstp
+                    ? "Rapid PVST+: konvergiert in wenigen Sekunden statt 30–50 s."
+                    : "Klassisches PVST+ (802.1D). Für neue Netze ist RSTP empfohlen."),
+                    this.validatedField(`protocol:${type}.rootRole`, "Root-Bridge-Rolle", role),
+                    hint("Automatisch: Der Switch am Router (sonst mit den meisten Switch-Nachbarn) wird Primary Root."));
+                return { element, read: () => ({ rootRole: role.value as ProtocolSettings["rootRole"] }) };
+            }
+            case ProtocolType.EtherChannel: {
+                const mode = select([["active", "LACP active"], ["passive", "LACP passive"]], settings?.lacpMode ?? "active");
+                element.append(this.validatedField(`protocol:${type}.lacpMode`, "LACP-Modus", mode),
+                    hint("Wird automatisch aus mindestens zwei parallelen Links zum selben Switch gebildet. Mindestens eine Seite muss active sein."));
+                return { element, read: () => ({ lacpMode: mode.value as ProtocolSettings["lacpMode"] }) };
+            }
+            default:
+                element.append(hint("Für dieses Protokoll sind hier noch keine Angaben nötig."));
+                return { element, read: () => undefined };
+        }
+    }
+
+    private vlanPanel(element: HTMLElement, settings: ProtocolSettings | undefined, hint: (text: string) => HTMLElement) {
+        const rows: { id: HTMLInputElement; name: HTMLInputElement }[] = [];
+        const list = document.createElement("div"); list.className = "configuration-vlan-list";
+        const error = document.createElement("p"); error.className = "configuration-field-error"; error.hidden = true;
+        const addRow = (id = "", name = "") => {
+            const row = document.createElement("div"); row.className = "configuration-vlan-row";
+            const idInput = input("number", id); idInput.min = "2"; idInput.max = "4094"; idInput.placeholder = "ID";
+            idInput.setAttribute("aria-label", "VLAN-ID");
+            const nameInput = input("text", name, 32); nameInput.placeholder = "Name, z. B. Clients";
+            nameInput.setAttribute("aria-label", "VLAN-Name");
+            const remove = button("×"); remove.className = "configuration-vlan-remove";
+            remove.setAttribute("aria-label", "VLAN entfernen");
+            const entry = { id: idInput, name: nameInput };
+            remove.addEventListener("click", () => {
+                rows.splice(rows.indexOf(entry), 1); row.remove();
+                // "input" bubbelt bis zum Formular: Status und Access-VLAN-Auswahl aktualisieren sich.
+                list.dispatchEvent(new Event("input", { bubbles: true }));
+            });
+            row.append(idInput, nameInput, remove);
+            list.append(row); rows.push(entry);
+        };
+        for (const vlan of settings?.vlans ?? []) { addRow(String(vlan.id), vlan.name); }
+        const add = button("+ VLAN hinzufügen"); add.className = "configuration-secondary configuration-vlan-add";
+        add.addEventListener("click", () => { addRow(); rows[rows.length - 1].id.focus(); });
+        const native = input("number", String(settings?.nativeVlan ?? "")); native.min = "1"; native.max = "4094";
+
+        element.append(hint("VLANs dieses Switches. Fehlende VLANs auf Transit-Switches ergänzt der Generator."),
+            list, error, add,
+            this.validatedField(`protocol:${ProtocolType.Vlan}.nativeVlan`, "Native VLAN (Trunks)", native),
+            hint("Empfohlen: ein eigenes, unbenutztes VLAN wie 99 statt VLAN 1."));
+        return {
+            element,
+            read: (): ProtocolSettings => {
+                // Fehler einzelner Zeilen erscheinen gesammelt unter der Liste.
+                rows.forEach((row, index) => {
+                    this.fields.set(`protocol:${ProtocolType.Vlan}.vlans.${index}.id`, { control: row.id, error });
+                    this.fields.set(`protocol:${ProtocolType.Vlan}.vlans.${index}.name`, { control: row.name, error });
+                });
+                return {
+                    vlans: rows.filter((row) => row.id.value.trim())
+                        .map((row) => ({ id: Number(row.id.value), name: row.name.value.trim() })),
+                    nativeVlan: native.value.trim() ? Number(native.value) : undefined
+                };
+            }
+        };
     }
 }
 
@@ -1038,4 +1261,22 @@ function input(type: string, value = "", maxLength?: number): HTMLInputElement {
 function button(text: string): HTMLButtonElement {
     const result = document.createElement("button"); result.type = "button"; result.textContent = text;
     return result;
+}
+function select(options: [string, string][], value: string): HTMLSelectElement {
+    const element = document.createElement("select");
+    for (const [optionValue, text] of options) { element.add(new Option(text, optionValue, false, optionValue === value)); }
+    return element;
+}
+/** Behält die bisherige Auswahl, solange das VLAN noch existiert. */
+function fillVlanSelect(element: HTMLSelectElement, vlans: { id: number; name: string }[]): void {
+    const current = element.value || element.dataset.value || "";
+    element.replaceChildren(new Option("VLAN 1 (Default)", ""));
+    for (const vlan of vlans) {
+        if (Number.isInteger(vlan.id) && vlan.id > 1) { element.add(new Option(`${vlan.id} – ${vlan.name || "ohne Name"}`, String(vlan.id))); }
+    }
+    element.value = [...element.options].some((option) => option.value === current) ? current : "";
+    delete element.dataset.value;
+}
+function setChecked(element: HTMLInputElement, checked: boolean): void {
+    if (element.checked !== checked) { element.checked = checked; element.dispatchEvent(new Event("change", { bubbles: true })); }
 }
