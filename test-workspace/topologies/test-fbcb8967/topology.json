@@ -1,0 +1,145 @@
+{
+  "id": "fbcb8967-778c-491c-a019-0f9f9945c59b",
+  "name": "test",
+  "schemaVersion": 2,
+  "createdAt": "2026-11-22T17:56:07.116Z",
+  "updatedAt": "2026-11-22T17:56:07.116Z",
+  "devices": [
+    {
+      "id": "7f587940-6442-4729-a3e1-ac49a4632f60",
+      "topologyId": "fbcb8967-778c-491c-a019-0f9f9945c59b",
+      "label": "R1",
+      "hostname": "R1",
+      "type": "router",
+      "interfaces": [
+        {
+          "id": "01be480c-b5de-4a11-85fc-a0a3c35f63fe",
+          "deviceId": "7f587940-6442-4729-a3e1-ac49a4632f60",
+          "name": "GigabitEthernet0/0",
+          "status": "down",
+          "enabled": false,
+          "type": "gigabit-ethernet",
+          "layer": 3
+        },
+        {
+          "id": "3b4a57a5-0ccf-44b9-b8f2-980e72789053",
+          "deviceId": "7f587940-6442-4729-a3e1-ac49a4632f60",
+          "name": "GigabitEthernet0/1",
+          "status": "down",
+          "enabled": false,
+          "type": "gigabit-ethernet",
+          "layer": 3
+        }
+      ],
+      "protocols": [
+        {
+          "id": "7f587940-6442-4729-a3e1-ac49a4632f60:rip",
+          "type": "rip",
+          "enabled": true,
+          "rip": {
+            "version": 2,
+            "noAutoSummary": true,
+            "networks": [
+              {
+                "address": "192.168.10.0"
+              }
+            ]
+          }
+        },
+        {
+          "id": "7f587940-6442-4729-a3e1-ac49a4632f60:ospf",
+          "type": "ospf",
+          "enabled": false,
+          "ospf": {
+            "processes": [
+              {
+                "processId": 1,
+                "networks": [
+                  {
+                    "address": "",
+                    "wildcardMask": "",
+                    "area": "0"
+                  }
+                ],
+                "passiveInterfaceDefault": false,
+                "passiveInterfaces": {}
+              }
+            ]
+          }
+        },
+        {
+          "id": "7f587940-6442-4729-a3e1-ac49a4632f60:dhcp",
+          "type": "dhcp",
+          "enabled": false
+        },
+        {
+          "id": "7f587940-6442-4729-a3e1-ac49a4632f60:static-route",
+          "type": "static-route",
+          "enabled": false
+        },
+        {
+          "id": "7f587940-6442-4729-a3e1-ac49a4632f60:acl",
+          "type": "acl",
+          "enabled": false,
+          "acls": []
+        },
+        {
+          "id": "7f587940-6442-4729-a3e1-ac49a4632f60:nat",
+          "type": "nat",
+          "enabled": false,
+          "nat": {
+            "insideInterfaceId": "",
+            "outsideInterfaceId": "",
+            "mappings": []
+          }
+        },
+        {
+          "id": "7f587940-6442-4729-a3e1-ac49a4632f60:pat",
+          "type": "pat",
+          "enabled": false,
+          "pat": {
+            "aclName": "",
+            "insideInterfaceId": "",
+            "outsideInterfaceId": ""
+          }
+        }
+      ]
+    },
+    {
+      "id": "10828c1c-fb99-4558-b29c-f12105d0d0fa",
+      "topologyId": "fbcb8967-778c-491c-a019-0f9f9945c59b",
+      "label": "R2",
+      "hostname": "R2",
+      "type": "router",
+      "interfaces": [
+        {
+          "id": "c7c21e0e-e589-4daf-b4f8-4f8572f44a9f",
+          "deviceId": "10828c1c-fb99-4558-b29c-f12105d0d0fa",
+          "name": "GigabitEthernet0/0",
+          "status": "down",
+          "enabled": false
+        },
+        {
+          "id": "4a86211d-cec7-4ee7-a471-aa088aa4a4ed",
+          "deviceId": "10828c1c-fb99-4558-b29c-f12105d0d0fa",
+          "name": "GigabitEthernet0/1",
+          "status": "down",
+          "enabled": false
+        }
+      ]
+    }
+  ],
+  "connections": [],
+  "layout": {
+    "devices": {
+      "7f587940-6442-4729-a3e1-ac49a4632f60": {
+        "x": -80,
+        "y": 60
+      },
+      "10828c1c-fb99-4558-b29c-f12105d0d0fa": {
+        "x": 100,
+        "y": 60
+      }
+    }
+  }
+}
