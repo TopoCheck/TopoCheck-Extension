@@ -184,6 +184,8 @@ suite("H2c device configuration", () => {
                     type: ProtocolType.Rip,
                     enabled: true,
                     rip: {
+                        version: 2,
+                        noAutoSummary: true,
                         networks: [{ address: "10.0.0.0" }]
                     }
                 },
