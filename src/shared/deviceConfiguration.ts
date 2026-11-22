@@ -57,6 +57,7 @@ function isRipConfiguration(value: unknown): boolean {
         (config.noAutoSummary === undefined ||
             typeof config.noAutoSummary === "boolean") &&
         Array.isArray(config.networks) &&
+    return Array.isArray(config.networks) &&
         config.networks.length <= 1024 &&
         config.networks.every((network: unknown) => {
             if (!network || typeof network !== "object") { return false; }
