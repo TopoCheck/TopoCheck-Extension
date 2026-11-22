@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { isProtocolComplete } from "../../shared/switchingSettings";
 import { randomUUID } from "crypto";
 import { isFinitePoint, roundPoint } from "../../shared/geometry";
 import { isHostnameTaken, nextHostname, validateHostname } from "./hostname";
@@ -17,7 +18,7 @@ import {
     Position,
     Topology,
 } from "./models";
-import { AclProtocol, NatProtocol, PatProtocol, RipProtocol, OspfProtocol } from "../../models/ciscoProtocols";
+import { AclProtocol, DhcpProtocol, NatProtocol, OspfProtocol, PatProtocol, RipProtocol, StaticRouteProtocol } from "../../models/ciscoProtocols";
 
 /** Arten von Änderungen auf die andere module reagieren können. */
 export enum TopologyChangeType {
@@ -457,17 +458,22 @@ export class TopologyStore implements vscode.Disposable {
                 vtyPassword: model.vtyPassword, banner: model.banner,
                 interfaces: device.interfaces.map((iface) => {
                     const configured = model.findInterface(iface.id)!;
+                    const input = configuration.interfaces.find((item) => item.id === iface.id);
                     return {
                         ...iface, type: configured.type, enabled: configured.enabled,
                         ipAddress: configured.ipAddress, subnetMask: configured.subnetMask,
-                        description: configured.description, layer: configured.layer
+                        description: configured.description, layer: configured.layer,
+                        accessVlan: input?.accessVlan, portMode: input?.portMode
                     };
                 }),
                 protocols: model.protocols.map((protocol) => {
+                    // H3b: Ein unvollständiges Protokoll bleibt gespeichert, wird aber nie als aktiviert übernommen.
+                    const settings = configuration.protocols.find((item) => item.type === protocol.type)?.settings;
                     const base = {
                         id: protocol.id,
                         type: protocol.type,
-                        enabled: protocol.enabled
+                        enabled: protocol.enabled && isProtocolComplete(protocol.type, settings),
+                        ...(settings ? { settings } : {})
                     };
 
                     if (protocol instanceof AclProtocol) {
@@ -509,6 +515,32 @@ export class TopologyStore implements vscode.Disposable {
                                     passiveInterfaces: { ...process.passiveInterfaces }
                                 }))
                             }
+                        };
+                    }
+                    if (protocol instanceof DhcpProtocol) {
+                        return {
+                            ...base,
+                            dhcp: protocol.pools.map((pool) => ({
+                                name: pool.name,
+                                interfaceName: pool.interfaceName,
+                                dnsServer: pool.dnsServer,
+                                excludedAddresses: pool.excludedAddresses
+                                    ? [...pool.excludedAddresses]
+                                    : undefined
+                            }))
+                        };
+                    }
+
+                    if (protocol instanceof StaticRouteProtocol) {
+                        return {
+                            ...base,
+                            staticRoutes: protocol.routes.map((route) => ({
+                                destination: route.destination,
+                                subnetMask: route.subnetMask,
+                                nextHop: route.nextHop,
+                                outgoingInterface: route.outgoingInterface,
+                                administrativeDistance: route.administrativeDistance
+                            }))
                         };
                     }
 

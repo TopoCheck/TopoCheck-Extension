@@ -5,12 +5,17 @@ import { RipConfigGenerator } from "./RipConfigGenerator";
 import { OspfConfigGenerator } from "./OspfConfigGenerator";
 import { AclConfigGenerator } from "./AclConfigGenerator";
 import { NatConfigGenerator } from "./NatConfigGenerator";
+import { BasicConfigGenerator } from "./BasicConfigGenerator";
+import { DhcpConfigGenerator } from "./DhcpConfigGenerator";
+import { StaticRouteConfigGenerator } from "./StaticRouteConfigGenerator";
 import {
     AclProtocol,
     NatProtocol,
     PatProtocol,
     RipProtocol,
-    OspfProtocol
+    OspfProtocol,
+    DhcpProtocol,
+    StaticRouteProtocol,
 } from "../../models/ciscoProtocols";
 
 export class ConfigModule implements IModule {
@@ -20,6 +25,9 @@ export class ConfigModule implements IModule {
     private readonly ospfGenerator = new OspfConfigGenerator();
     private readonly aclGenerator = new AclConfigGenerator();
     private readonly natGenerator = new NatConfigGenerator();
+    private readonly basicGenerator = new BasicConfigGenerator();
+    private readonly dhcpGenerator = new DhcpConfigGenerator();
+    private readonly staticRouteGenerator = new StaticRouteConfigGenerator();
 
     constructor(private readonly store: TopologyStore) { }
 
@@ -41,9 +49,7 @@ export class ConfigModule implements IModule {
                 router.id
             );
 
-            const blocks: string[] = [
-                `hostname ${device.hostname}`
-            ];
+            const blocks: string[] = [];
 
             const ripEnabled = device.protocols.some(
                 protocol => protocol instanceof RipProtocol && protocol.enabled
@@ -63,14 +69,28 @@ export class ConfigModule implements IModule {
             const pat = device.protocols.find(
                 (protocol): protocol is PatProtocol => protocol instanceof PatProtocol && protocol.enabled
             );
-            const hasSecurityConfiguration = !!(acl || nat || pat);
-            const routingExit = hasSecurityConfiguration ? "\n exit" : "";
+            const dhcpEnabled = device.protocols.some(
+                protocol => protocol instanceof DhcpProtocol && protocol.enabled
+            );
+
+            const staticRouteEnabled = device.protocols.some(
+                protocol => protocol instanceof StaticRouteProtocol && protocol.enabled
+            );
+
             if (ripEnabled) {
-                blocks.push(this.ripGenerator.generate(device) + routingExit);
+                blocks.push(this.ripGenerator.generate(device) + "\n exit");
             }
 
             if (ospfEnabled) {
-                blocks.push(this.ospfGenerator.generate(device) + routingExit);
+                blocks.push(this.ospfGenerator.generate(device) + "\n exit");
+            }
+
+            if (dhcpEnabled) {
+                blocks.push(this.dhcpGenerator.generate(device));
+            }
+
+            if (staticRouteEnabled) {
+                blocks.push(this.staticRouteGenerator.generate(device));
             }
 
             const interfaceCommands = new Map<string, string[]>();
@@ -83,15 +103,8 @@ export class ConfigModule implements IModule {
             if (pat) {
                 blocks.push(this.natGenerator.generatePat(device, pat, interfaceCommands));
             }
-            for (const [name, commands] of interfaceCommands) {
-                blocks.push([`interface ${name}`, ...commands, " exit"].join("\n"));
-            }
 
-            if (blocks.length === 1) {
-                continue;
-            }
-
-            const content = [...blocks, "end"].join("\n\n");
+            const content = this.basicGenerator.generate(device, blocks, interfaceCommands) + "\n\nend";
 
             await this.store.saveGeneratedConfig(
                 topologyId,

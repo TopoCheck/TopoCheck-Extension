@@ -18,6 +18,7 @@ import { isHostnameTaken, validateHostname } from "../hostname";
 import { Topology } from "../models";
 import { TopologyChangeType, TopologyStore } from "../TopologyStore";
 import { parseWebviewMessage } from "./parseWebviewMessage";
+import { submitTopology } from "../../config/topologySubmission";
 import { ConfigurationFieldError, DeviceConfigurationValidationError } from "../../../shared/validateDeviceConfiguration";
 import { ConfigModule } from "../../config/ConfigModule";
 
@@ -221,7 +222,6 @@ export class TopologyViewPanel implements vscode.Disposable {
         if (!device) {
             return;
         }
-
         await this.panel.webview.postMessage({
             type: "editDevice", device,
             connectedInterfaceIds: topology.connections.flatMap((connection) => [connection.interfaceAId, connection.interfaceBId]),
@@ -265,17 +265,18 @@ export class TopologyViewPanel implements vscode.Disposable {
                         validationErrors = cause.errors;
                     }
                 }
-
                 await this.panel.webview.postMessage({
                     type: "configurationResult",
                     deviceId: message.deviceId, error, validationErrors
                 } satisfies ExtensionToWebviewMessage);
-
                 return;
             }
 
             case "ready":
                 await this.postState();
+                return;
+            case "submitTopology":
+                await submitTopology(this.store, this.topologyId, message.mode);
                 return;
 
             case "confirmTopology":

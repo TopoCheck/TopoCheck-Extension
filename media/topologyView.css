@@ -658,8 +658,9 @@ kbd {
     --configuration-accent: #6366f1;
     position: relative;
     inset: auto;
-    width: clamp(280px, 28vw, 340px);
-    flex: 0 0 clamp(280px, 28vw, 340px);
+    /* --configuration-width setzt der Resizer; sonst Standardbreite. */
+    width: var(--configuration-width, clamp(280px, 28vw, 340px));
+    flex: 0 0 var(--configuration-width, clamp(280px, 28vw, 340px));
     min-width: 0;
     height: 100%;
     max-height: none;
@@ -932,18 +933,18 @@ kbd {
     border-color: var(--protocol-group-accent);
 }
 
-.configuration-protocol-toggle {
+.configuration-protocol-switch {
     min-height: 34px;
     padding: 0 8px;
     cursor: pointer;
     font-weight: 600;
 }
 
-.configuration-protocol-toggle > span:first-child {
+.configuration-protocol-switch > span:first-child {
     flex: 1;
 }
 
-.configuration-protocol-toggle input {
+.configuration-protocol-switch input {
     accent-color: var(--protocol-group-accent);
 }
 
@@ -966,6 +967,65 @@ kbd {
 
 .configuration-protocol-settings > .configuration-advanced:first-child {
     margin-top: 0;
+}
+
+.configuration-protocol-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 0;
+}
+
+.configuration-protocol-row input {
+    margin: 0;
+    accent-color: var(--configuration-accent);
+}
+
+.device-configuration .configuration-protocol-toggle {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 2px;
+    background: transparent;
+    color: var(--vscode-foreground);
+    text-align: left;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+.device-configuration .configuration-protocol-toggle::after {
+    content: "›";
+    font-size: 14px;
+    color: var(--vscode-descriptionForeground);
+    transition: transform .15s;
+}
+
+.device-configuration .configuration-protocol-toggle[aria-expanded="true"]::after {
+    transform: rotate(90deg);
+}
+
+.device-configuration .configuration-protocol-toggle:hover {
+    background: var(--vscode-toolbar-hoverBackground);
+}
+
+.configuration-protocol-badge {
+    min-width: 70px;
+    text-align: right;
+    font-size: 10px;
+}
+
+.configuration-protocol-badge[data-state="complete"] {
+    color: var(--vscode-testing-iconPassed, #10b981);
+    font-weight: 600;
+}
+
+.configuration-protocol-badge[data-state="incomplete"] {
+    color: var(--vscode-editorWarning-foreground, #bd9b35);
+}
+
+.configuration-protocol-panel {
+    padding: 4px 0 12px 24px;
 }
 
 .configuration-actions {
@@ -1080,7 +1140,7 @@ kbd {
         position: absolute;
         right: 0;
         top: 0;
-        width: min(320px, calc(100vw - 40px));
+        width: min(var(--configuration-width, 320px), calc(100vw - 40px));
         z-index: 20;
         box-shadow: -8px 0 24px rgb(0 0 0 / 15%);
     }
@@ -1164,12 +1224,135 @@ kbd {
     box-sizing: border-box;
     width: 100%;
     min-width: 0;
-    padding: 7px 8px;
-    border: 1px solid var(--vscode-dropdown-border, transparent);
-    border-radius: 4px;
-    background: var(--vscode-dropdown-background);
-    color: var(--vscode-dropdown-foreground);
+    line-height: 1.4;
+    padding: 6px 8px;
     font: inherit;
     font-size: 11px;
-    line-height: 1.4;
+    border: 1px solid var(--vscode-dropdown-border, var(--vscode-input-border, transparent));
+    border-radius: 4px;
+    background: var(--vscode-dropdown-background, var(--vscode-input-background));
+    color: var(--vscode-dropdown-foreground, var(--vscode-input-foreground));
+}
+
+.configuration-vlan-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-bottom: 8px;
+}
+
+.configuration-vlan-row {
+    display: grid;
+    grid-template-columns: 76px 1fr auto;
+    gap: 6px;
+}
+
+.device-configuration .configuration-vlan-remove {
+    padding: 0 9px;
+    background: transparent;
+    color: var(--vscode-descriptionForeground);
+    font-size: 16px;
+}
+
+.device-configuration .configuration-vlan-add {
+    margin-bottom: 12px;
+    padding: 5px 10px;
+}
+
+.configuration-switchport {
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px dashed var(--vscode-panel-border, #dedfe8);
+}
+
+/* Ziehbarer linker Rand des Formulars */
+.configuration-resizer {
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 6px;
+    cursor: col-resize;
+    z-index: 2;
+    touch-action: none;
+}
+
+.configuration-resizer:hover,
+.configuration-resizer:active {
+    background: var(--vscode-sash-hoverBorder, var(--vscode-focusBorder));
+}
+
+/* "Topologie absenden" in der Werkzeugleiste */
+.submit-topology-wrapper {
+    position: relative;
+}
+
+.submit-topology {
+    font: inherit;
+    font-size: 12px;
+    padding: 5px 12px;
+    border: 0;
+    border-radius: 4px;
+    cursor: pointer;
+    background: var(--vscode-button-background);
+    color: var(--vscode-button-foreground);
+}
+
+.submit-topology:hover:not(:disabled) {
+    background: var(--vscode-button-hoverBackground, var(--vscode-button-background));
+}
+
+.submit-topology:disabled {
+    opacity: .5;
+    cursor: not-allowed;
+}
+
+.submit-topology-menu {
+    position: absolute;
+    right: 0;
+    top: calc(100% + 6px);
+    z-index: 30;
+    width: 280px;
+    padding: 6px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    border-radius: 6px;
+    background: var(--vscode-menu-background, var(--vscode-editor-background));
+    border: 1px solid var(--vscode-menu-border, var(--vscode-panel-border));
+    box-shadow: 0 6px 20px rgb(0 0 0 / 20%);
+}
+
+.submit-topology-menu[hidden] {
+    display: none;
+}
+
+.submit-topology-menu button {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    padding: 8px 10px;
+    text-align: left;
+    font: inherit;
+    border: 0;
+    border-radius: 4px;
+    cursor: pointer;
+    background: transparent;
+    color: var(--vscode-menu-foreground, var(--vscode-foreground));
+}
+
+.submit-topology-menu button:hover,
+.submit-topology-menu button:focus-visible {
+    background: var(--vscode-menu-selectionBackground, var(--vscode-list-hoverBackground));
+    color: var(--vscode-menu-selectionForeground, inherit);
+}
+
+.submit-topology-menu strong {
+    font-size: 12px;
+}
+
+.submit-topology-menu span {
+    font-size: 11px;
+    opacity: .8;
+    white-space: normal;
 }

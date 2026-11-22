@@ -53,16 +53,17 @@ suite("NAT and PAT configuration generation", () => {
         const generator = new ConfigModule(store);
         assert.strictEqual(await generator.generateForTopology(topologyId), 1);
         assert.strictEqual(await readConfig(), [
-            `hostname ${router.hostname}`, "",
+            `hostname ${router.hostname}`, "no ip domain-lookup", "",
             "ip nat inside source static 192.168.1.5 203.0.113.5",
             "ip nat inside source static 192.168.1.6 203.0.113.6", "",
-            `interface ${router.interfaces[0].name}`, " ip nat inside", " exit", "",
-            `interface ${router.interfaces[1].name}`, " ip nat outside", " exit", "", "end"
+            `interface ${router.interfaces[0].name}`, " shutdown", " ip nat inside", " exit", "",
+            `interface ${router.interfaces[1].name}`, " shutdown", " ip nat outside", " exit", "", "end"
         ].join("\n"));
 
         draft.protocols[0].enabled = false;
         await store.configureDevice(topologyId, router.id, draft);
-        assert.strictEqual(await generator.generateForTopology(topologyId), 0);
+        assert.strictEqual(await generator.generateForTopology(topologyId), 1);
+        assert.ok(!(await readConfig()).includes("ip nat"));
     });
 
     test("writes the NAT role and ACL binding in one interface block", async () => {
@@ -83,8 +84,8 @@ suite("NAT and PAT configuration generation", () => {
         const interfaceLine = `interface ${router.interfaces[0].name}`;
         assert.strictEqual(lines.filter((line) => line === interfaceLine).length, 1);
         const start = lines.indexOf(interfaceLine);
-        assert.deepStrictEqual(lines.slice(start, start + 4),
-            [interfaceLine, " ip nat inside", " ip access-group INSIDE_FILTER in", " exit"]);
+        assert.deepStrictEqual(lines.slice(start, start + 5),
+            [interfaceLine, " shutdown", " ip nat inside", " ip access-group INSIDE_FILTER in", " exit"]);
         assert.ok(lines.indexOf("ip access-list extended INSIDE_FILTER") < start);
     });
 
@@ -128,11 +129,11 @@ suite("NAT and PAT configuration generation", () => {
 
         assert.strictEqual(await new ConfigModule(store).generateForTopology(topologyId), 1);
         assert.strictEqual(await readConfig(), [
-            `hostname ${router.hostname}`, "",
+            `hostname ${router.hostname}`, "no ip domain-lookup", "",
             "ip access-list extended PAT_SOURCES", " permit ip 192.168.1.0 0.0.0.255 any", " exit", "",
             `ip nat inside source list PAT_SOURCES interface ${router.interfaces[1].name} overload`, "",
-            `interface ${router.interfaces[0].name}`, " ip nat inside", " exit", "",
-            `interface ${router.interfaces[1].name}`, " ip nat outside", " exit", "", "end"
+            `interface ${router.interfaces[0].name}`, " shutdown", " ip nat inside", " exit", "",
+            `interface ${router.interfaces[1].name}`, " shutdown", " ip nat outside", " exit", "", "end"
         ].join("\n"));
     });
 

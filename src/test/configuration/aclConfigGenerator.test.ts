@@ -54,6 +54,7 @@ suite("IPv4 ACL configuration generation", () => {
         assert.strictEqual(await new ConfigModule(store).generateForTopology(topologyId), 1);
         assert.strictEqual(await readConfig(), [
             `hostname ${router.hostname}`,
+            "no ip domain-lookup",
             "",
             "ip access-list extended LAB_FILTER",
             " deny ip host 192.0.2.4 any",
@@ -61,8 +62,11 @@ suite("IPv4 ACL configuration generation", () => {
             " deny ip any host 198.51.100.1",
             " exit", "",
             `interface ${router.interfaces[0].name}`,
+            " shutdown",
             " ip access-group LAB_FILTER in",
             " exit", "",
+            `interface ${router.interfaces[1].name}`,
+            " shutdown", " exit", "",
             "end"
         ].join("\n"));
     });
@@ -83,7 +87,8 @@ suite("IPv4 ACL configuration generation", () => {
 
         draft.protocols = [{ type: ProtocolType.Acl, enabled: false, acls: [acl] }];
         await store.configureDevice(topologyId, router.id, draft);
-        assert.strictEqual(await generator.generateForTopology(topologyId), 0);
+        assert.strictEqual(await generator.generateForTopology(topologyId), 1);
+        assert.ok(!(await readConfig()).includes("ip access-list"));
     });
 
     test("rejects an invalid wildcard and a binding to an unknown interface", async () => {
@@ -121,8 +126,9 @@ suite("IPv4 ACL configuration generation", () => {
         assert.ok(config.includes(" deny ip any host 198.51.100.1\n exit\n\nip access-list extended OUTBOUND"));
         assert.ok(config.endsWith([
             "ip access-list extended OUTBOUND", " permit ip any any", " exit", "",
-            `interface ${router.interfaces[0].name}`, " ip access-group LAB_FILTER in",
-            " ip access-group OUTBOUND out", " exit", "", "end"
+            `interface ${router.interfaces[0].name}`, " shutdown", " ip access-group LAB_FILTER in",
+            " ip access-group OUTBOUND out", " exit", "",
+            `interface ${router.interfaces[1].name}`, " shutdown", " exit", "", "end"
         ].join("\n")));
     });
 

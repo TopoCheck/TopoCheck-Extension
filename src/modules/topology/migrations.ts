@@ -22,6 +22,8 @@ type RawTopology = Record<string, unknown>;
 /** Migrationsschritte: Schlüssel = Ausgangsversion. */
 const MIGRATIONS: Record<number, (raw: RawTopology) => RawTopology> = {
     1: (raw) => ({ ...raw, layout: { devices: {} }, schemaVersion: 2 }),
+    // H3b: neue Felder sind optional, alte Dateien bleiben gültig.
+    2: (raw) => ({ ...raw, schemaVersion: 3 }),
 };
 
 export function migrateTopology(raw: unknown): Topology {
