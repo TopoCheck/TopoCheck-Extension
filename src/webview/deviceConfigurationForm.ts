@@ -1,4 +1,5 @@
 import type { Device } from "../modules/topology/models";
+import { Ipv4AclConfiguration, Ipv4AclRule, MAX_IPV4_ACL_RULES } from "../models/ciscoProtocols";
 import { DeviceType } from "../models/deviceType";
 import { ProtocolType } from "../models/protocolType";
 import { compatibleProtocols, configurationOf, DeviceConfiguration } from "../shared/deviceConfiguration";
@@ -172,6 +173,100 @@ export class DeviceConfigurationForm {
         this.fields.set(key, { control, error });
         wrapper.append(field(text, control), error);
         return wrapper;
+    }
+
+    private appendAclSettings(
+        settings: HTMLElement,
+        device: Device,
+        saved: Ipv4AclConfiguration | undefined,
+        protocolIndex: number
+    ): () => Ipv4AclConfiguration {
+        const prefix = `protocols.${protocolIndex}.acl`;
+        const name = input("text", saved?.name ?? "", 64);
+        const iface = document.createElement("select");
+        iface.append(new Option("Ohne Interface-Zuweisung", ""));
+        for (const entry of device.interfaces) {
+            if (entry.layer !== 2) {
+                iface.append(new Option(entry.name, entry.id));
+            }
+        }
+        const savedInterface = saved?.binding?.interfaceId ?? "";
+        if (savedInterface && !Array.from(iface.options).some((option) => option.value === savedInterface)) {
+            iface.append(new Option("Gespeichertes Interface nicht verfügbar", savedInterface));
+        }
+        iface.value = savedInterface;
+
+        const direction = document.createElement("select");
+        direction.append(new Option("Eingehend (in)", "in"), new Option("Ausgehend (out)", "out"));
+        direction.value = saved?.binding?.direction ?? "in";
+        direction.disabled = !iface.value;
+        iface.addEventListener("change", () => { direction.disabled = !iface.value; });
+
+        const rules = document.createElement("div");
+        const readRules = new Map<HTMLElement, () => Ipv4AclRule>();
+        const add = button("ACL-Regel hinzufügen");
+        add.className = "configuration-secondary";
+
+        const addRule = (rule?: Ipv4AclRule) => {
+            const row = document.createElement("fieldset");
+            row.className = "configuration-advanced";
+            const legend = document.createElement("legend");
+            legend.textContent = "IPv4-Regel";
+            const action = document.createElement("select");
+            action.append(new Option("Erlauben (permit)", "permit"), new Option("Verwerfen (deny)", "deny"));
+            action.value = rule?.action ?? "permit";
+            const source = input("text", rule?.source ?? "", 15);
+            const sourceWildcard = input("text", rule?.sourceWildcard ?? "", 15);
+            const destination = input("text", rule?.destination ?? "", 15);
+            const destinationWildcard = input("text", rule?.destinationWildcard ?? "", 15);
+            source.placeholder = destination.placeholder = "IPv4-Adresse oder any";
+            sourceWildcard.placeholder = destinationWildcard.placeholder = "Leer für Einzeladresse oder any";
+            const remove = button("Regel entfernen");
+            remove.className = "configuration-secondary";
+            remove.addEventListener("click", () => {
+                readRules.delete(row);
+                row.remove();
+                add.disabled = false;
+                this.dirty = true;
+                this.clearValidationErrors();
+                add.focus();
+            });
+            row.append(legend, field("Aktion", action), field("Quelle", source),
+                field("Quell-Wildcard", sourceWildcard), field("Ziel", destination),
+                field("Ziel-Wildcard", destinationWildcard), remove);
+            readRules.set(row, () => ({
+                action: action.value === "deny" ? "deny" : "permit",
+                source: source.value.trim(),
+                sourceWildcard: sourceWildcard.value.trim(),
+                destination: destination.value.trim(),
+                destinationWildcard: destinationWildcard.value.trim()
+            }));
+            rules.append(row);
+            add.disabled = readRules.size >= MAX_IPV4_ACL_RULES;
+            return source;
+        };
+
+        for (const rule of saved?.rules ?? []) {
+            addRule(rule);
+        }
+        add.addEventListener("click", () => {
+            if (readRules.size >= MAX_IPV4_ACL_RULES) { return; }
+            this.dirty = true;
+            this.clearValidationErrors();
+            addRule().focus();
+        });
+        settings.append(this.validatedField(`${prefix}.name`, "ACL-Name", name),
+            this.validatedField(`${prefix}.binding.interfaceId`, "Interface (optional)", iface),
+            field("Richtung", direction), rules, add);
+
+        return () => ({
+            name: name.value.trim(),
+            rules: Array.from(readRules.values(), (read) => read()),
+            binding: iface.value ? {
+                interfaceId: iface.value,
+                direction: direction.value === "out" ? "out" : "in"
+            } : undefined
+        });
     }
 
     private open(device: Device, otherHostnames: string[], connectedIds: string[]): void {
@@ -624,11 +719,15 @@ export class DeviceConfigurationForm {
             }
 
             protocols.append(settings);
+            const readAcl = type === ProtocolType.Acl
+                ? this.appendAclSettings(settings, device, saved?.acl, protocolIndex)
+                : undefined;
 
             return {
                 type,
                 enabled,
                 settings,
+                readAcl,
                 ripVersion,
                 ripNoAutoSummary,
                 ripNetworkControls,
@@ -674,6 +773,7 @@ export class DeviceConfigurationForm {
                 protocols: protocolControls.map(({
                     type,
                     enabled,
+                    readAcl,
                     ripNetworkControls,
                     ripVersion,
                     ripNoAutoSummary,
@@ -685,6 +785,7 @@ export class DeviceConfigurationForm {
                 }) => ({
                     type,
                     enabled: enabled.checked,
+                    ...(readAcl ? { acl: readAcl() } : {}),
 
                     ...(type === ProtocolType.Rip
                         ? {

@@ -17,7 +17,7 @@ import {
     Position,
     Topology,
 } from "./models";
-import { RipProtocol, OspfProtocol } from "../../models/ciscoProtocols";
+import { AclProtocol, RipProtocol, OspfProtocol } from "../../models/ciscoProtocols";
 
 /** Arten von Änderungen auf die andere module reagieren können. */
 export enum TopologyChangeType {
@@ -469,6 +469,10 @@ export class TopologyStore implements vscode.Disposable {
                         type: protocol.type,
                         enabled: protocol.enabled
                     };
+
+                    if (protocol instanceof AclProtocol) {
+                        return { ...base, acl: protocol.configuration };
+                    }
 
                     if (protocol instanceof RipProtocol) {
                         return {

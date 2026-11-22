@@ -65,6 +65,28 @@ export class RipProtocol extends NetworkProtocol {
     }
 }
 
+export interface Ipv4AclRule {
+  action: "permit" | "deny";
+  source: string;
+  sourceWildcard: string;
+  destination: string;
+  destinationWildcard: string;
+}
+
+export interface Ipv4AclConfiguration {
+  name: string;
+  rules: Ipv4AclRule[];
+  binding?: { interfaceId: string; direction: "in" | "out" };
+}
+
+export const MAX_IPV4_ACL_RULES = 1024;
+
+export class AclProtocol extends NetworkProtocol {
+  public constructor(id: string, enabled: boolean, public readonly configuration: Ipv4AclConfiguration) {
+    super({ id, enabled, type: ProtocolType.Acl });
+  }
+}
+
 export interface SwitchportConfiguration {
   mode?: "access" | "trunk";
   accessVlan?: number;

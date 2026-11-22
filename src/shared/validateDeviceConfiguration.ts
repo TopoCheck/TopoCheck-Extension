@@ -309,6 +309,7 @@ function validateInterfaceAddress(
 // ---------------------------------------------------------------------------
 
 function validateProtocols(
+    device: Device,
     deviceType: DeviceType | undefined,
     data: DeviceConfiguration,
     report: Report
@@ -337,8 +338,54 @@ function validateProtocols(
             validateRip(protocol, field, report);
         } else if (protocol.type === ProtocolType.Ospf) {
             validateOspf(protocol, field, report);
+        } else if (protocol.type === ProtocolType.Acl && protocol.acl !== undefined) {
+            validateAcl(device, data, protocol.acl, `${field}.acl`, report);
         }
     });
+}
+
+function validateAcl(
+    device: Device,
+    data: DeviceConfiguration,
+    acl: NonNullable<ProtocolConfiguration["acl"]>,
+    field: string,
+    report: Report
+): void {
+    if (acl.name !== acl.name.trim() || !/^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(acl.name)) {
+        report(`${field}.name`, "acl-name-invalid", "Der ACL-Name muss mit einem Buchstaben beginnen und darf Buchstaben, Ziffern, Bindestriche und Unterstriche enthalten.");
+    }
+    if (!acl.rules.length) {
+        report(`${field}.rules`, "acl-rules-required", "Füge mindestens eine ACL-Regel hinzu.");
+    }
+
+    acl.rules.forEach((rule, index) => {
+        const ruleField = `${field}.rules.${index}`;
+        for (const [key, label, wildcard] of [
+            ["source", "Quelle", rule.sourceWildcard],
+            ["destination", "Ziel", rule.destinationWildcard]
+        ] as const) {
+            const address = rule[key];
+            if (address !== "any" && !isAclIpv4(address)) {
+                report(`${ruleField}.${key}`, "acl-address-invalid", `Regel ${index + 1}, ${label}: Gib eine IPv4-Adresse oder „any“ ein.`);
+            }
+            if (wildcard !== "" && (address === "any" || !isAclIpv4(wildcard))) {
+                report(`${ruleField}.${key}Wildcard`, "acl-wildcard-invalid", `Regel ${index + 1}, ${label}: Gib eine gültige IPv4-Wildcard-Maske ein. Bei „any“ bleibt das Feld leer.`);
+            }
+        }
+    });
+
+    if (acl.binding) {
+        const iface = device.interfaces.find(({ id }) => id === acl.binding?.interfaceId);
+        const input = data.interfaces.find(({ id }) => id === acl.binding?.interfaceId);
+        if (!iface || (input?.layer ?? iface.layer) === 2 ||
+            iface.name !== iface.name.trim() || !/^[A-Za-z][A-Za-z0-9./-]*$/.test(iface.name)) {
+            report(`${field}.binding.interfaceId`, "acl-interface-invalid", "Wähle ein gültiges Layer-3-Interface dieses Routers.");
+        }
+    }
+}
+
+function isAclIpv4(value: string): boolean {
+    return value === value.trim() && isValidIpv4Address(value) && !hasLeadingZeros(value);
 }
 
 function validateRip(protocol: ProtocolConfiguration, field: string, report: Report): void {
@@ -472,7 +519,7 @@ export function validateDeviceConfiguration(
     const deviceType = validateDeviceModel(device, report);
     validateGeneral(data, otherHostnames, report);
     validateInterfaces(device, data, report);
-    validateProtocols(deviceType, data, report);
+    validateProtocols(device, deviceType, data, report);
 
     return errors;
 }

@@ -7,7 +7,7 @@ import { ProtocolType } from "../models/protocolType";
 import type { Device } from "../modules/topology/models";
 import { DeviceConfigurationValidationError, validateDeviceConfiguration } from "./validateDeviceConfiguration";
 import type { DeviceAccessConfiguration } from "../models/deviceAccessConfiguration";
-import { RipProtocol, OspfProtocol } from "../models/ciscoProtocols";
+import { AclProtocol, Ipv4AclConfiguration, MAX_IPV4_ACL_RULES, RipProtocol, OspfProtocol } from "../models/ciscoProtocols";
 
 export interface DeviceConfiguration extends DeviceAccessConfiguration {
     label?: string;
@@ -23,6 +23,7 @@ export interface DeviceConfiguration extends DeviceAccessConfiguration {
     protocols: {
         type: ProtocolType;
         enabled: boolean;
+        acl?: Ipv4AclConfiguration;
         rip?: {
             version: 1 | 2;
             noAutoSummary: boolean;
@@ -45,6 +46,28 @@ export interface DeviceConfiguration extends DeviceAccessConfiguration {
 }
 
 export { compatibleProtocols };
+
+function isAclConfiguration(value: unknown): boolean {
+    if (!value || typeof value !== "object") { return false; }
+    const { name, rules, binding } = value as Record<string, unknown>;
+    if (typeof name !== "string" || name.length > 64 ||
+        !Array.isArray(rules) || rules.length > MAX_IPV4_ACL_RULES) { return false; }
+
+    if (binding !== undefined) {
+        if (!binding || typeof binding !== "object") { return false; }
+        const { interfaceId, direction } = binding as Record<string, unknown>;
+        if (typeof interfaceId !== "string" || interfaceId.length > 128 ||
+            (direction !== "in" && direction !== "out")) { return false; }
+    }
+
+    return rules.every((entry: unknown) => {
+        if (!entry || typeof entry !== "object") { return false; }
+        const { action, source, sourceWildcard, destination, destinationWildcard } = entry as Record<string, unknown>;
+        return (action === "permit" || action === "deny") &&
+            [source, sourceWildcard, destination, destinationWildcard]
+                .every((part) => typeof part === "string" && part.length <= 15);
+    });
+}
 
 function isRipConfiguration(value: unknown): boolean {
     if (!value || typeof value !== "object") { return false; }
@@ -129,6 +152,7 @@ export function isDeviceConfiguration(value: unknown): value is DeviceConfigurat
                 typeof protocol.enabled === "boolean" &&
                 (protocol.rip === undefined || isRipConfiguration(protocol.rip)) &&
                 (protocol.ospf === undefined || isOspfConfiguration(protocol.ospf)) &&
+                (protocol.acl === undefined || (protocol.type === ProtocolType.Acl && isAclConfiguration(protocol.acl))) &&
                 (protocol.type === ProtocolType.Rip
                     ? protocol.ospf === undefined
                     : protocol.rip === undefined) &&
@@ -155,6 +179,10 @@ export function configurationOf(device: Device, connectedInterfaceIds: readonly 
                 type: protocol.type,
                 enabled: protocol.enabled
             };
+
+            if (protocol.acl !== undefined) {
+                result.acl = structuredClone(protocol.acl);
+            }
 
             if (protocol.rip !== undefined) {
                 result.rip = {
@@ -225,7 +253,9 @@ export function buildConfiguredDevice(device: Device, data: DeviceConfiguration,
             (item) => item.type === protocol.type
         )?.id ?? `${device.id}:${protocol.type}`;
 
-        if (protocol.type === ProtocolType.Rip) {
+        if (protocol.type === ProtocolType.Acl && protocol.acl !== undefined) {
+            model.addProtocol(new AclProtocol(id, protocol.enabled, structuredClone(protocol.acl)));
+        } else if (protocol.type === ProtocolType.Rip) {
             const rip = new RipProtocol(id);
             if (protocol.rip !== undefined) {
                 rip.version = protocol.rip.version ?? 2;
