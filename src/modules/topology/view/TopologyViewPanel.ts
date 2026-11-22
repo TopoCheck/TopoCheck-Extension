@@ -20,6 +20,7 @@ import { TopologyChangeType, TopologyStore } from "../TopologyStore";
 import { parseWebviewMessage } from "./parseWebviewMessage";
 import { submitTopology } from "../../config/topologySubmission";
 import { ConfigurationFieldError, DeviceConfigurationValidationError } from "../../../shared/validateDeviceConfiguration";
+import { ConfigModule } from "../../config/ConfigModule";
 
 export class TopologyViewPanel implements vscode.Disposable {
     /** Höchstens eine Ansicht pro Topologie. */
@@ -34,23 +35,32 @@ export class TopologyViewPanel implements vscode.Disposable {
     static async show(
         extensionUri: vscode.Uri,
         store: TopologyStore,
+        configModule: ConfigModule,
         topologyId: string
     ): Promise<TopologyViewPanel> {
         const existing = TopologyViewPanel.panels.get(topologyId);
+
         if (existing) {
             existing.panel.reveal();
             return existing;
         }
 
         const topology = await store.loadTopology(topologyId);
+
         const panel = vscode.window.createWebviewPanel(
             TOPOLOGY_VIEW_TYPE,
             TopologyViewPanel.titleFor(topology),
-            // Neben dem Editor: links Skript, rechts Topologie.
             { viewColumn: vscode.ViewColumn.Beside, preserveFocus: false },
             TopologyViewPanel.webviewOptions(extensionUri)
         );
-        return new TopologyViewPanel(panel, extensionUri, store, topologyId);
+
+        return new TopologyViewPanel(
+            panel,
+            extensionUri,
+            store,
+            configModule,
+            topologyId
+        );
     }
 
     /** Wiederherstellen nach einem Neustart von VS Code (WebviewPanelSerializer). */
@@ -58,10 +68,18 @@ export class TopologyViewPanel implements vscode.Disposable {
         panel: vscode.WebviewPanel,
         extensionUri: vscode.Uri,
         store: TopologyStore,
+        configModule: ConfigModule,
         topologyId: string
     ): TopologyViewPanel {
         panel.webview.options = TopologyViewPanel.webviewOptions(extensionUri);
-        return new TopologyViewPanel(panel, extensionUri, store, topologyId);
+
+        return new TopologyViewPanel(
+            panel,
+            extensionUri,
+            store,
+            configModule,
+            topologyId
+        );
     }
 
     /** Die zuletzt aktive Ansicht – Ziel der Kontextmenü-Befehle. */
@@ -94,6 +112,7 @@ export class TopologyViewPanel implements vscode.Disposable {
         private readonly panel: vscode.WebviewPanel,
         private readonly extensionUri: vscode.Uri,
         private readonly store: TopologyStore,
+        private readonly configModule: ConfigModule,
         readonly topologyId: string
     ) {
         TopologyViewPanel.panels.set(topologyId, this);
@@ -133,14 +152,15 @@ export class TopologyViewPanel implements vscode.Disposable {
     async renameDevice(deviceId: string): Promise<void> {
         const topology = await this.store.loadTopology(this.topologyId);
         const device = topology.devices.find((d) => d.id === deviceId);
+
         if (!device) {
             return;
         }
+
         const otherHostnames = topology.devices
             .filter((d) => d.id !== deviceId)
             .map((d) => d.hostname);
 
-        // Nativer VS-Code-Eingabedialog mit Live-Prüfung (gleiche Regeln wie im Store).
         const hostname = await vscode.window.showInputBox({
             title: `Gerät umbenennen (${device.hostname})`,
             prompt: "Neuer Hostname (wird auch in der generierten Konfiguration verwendet)",
@@ -151,6 +171,7 @@ export class TopologyViewPanel implements vscode.Disposable {
                     ? `"${value}" ist in dieser Topologie bereits vergeben.`
                     : undefined),
         });
+
         if (hostname === undefined || hostname === device.hostname) {
             return;
         }
@@ -164,11 +185,11 @@ export class TopologyViewPanel implements vscode.Disposable {
     async deleteDevice(deviceId: string): Promise<void> {
         const topology = await this.store.loadTopology(this.topologyId);
         const device = topology.devices.find((d) => d.id === deviceId);
+
         if (!device) {
             return;
         }
 
-        // Rückfrage nur, wenn mehr verloren geht als sichtbar ist
         const interfaceIds = new Set(device.interfaces.map((iface) => iface.id));
         const affectedConnections = topology.connections.filter(
             (c) => interfaceIds.has(c.interfaceAId) || interfaceIds.has(c.interfaceBId)
@@ -176,6 +197,7 @@ export class TopologyViewPanel implements vscode.Disposable {
 
         if (affectedConnections > 0) {
             const confirm = "Löschen";
+
             const answer = await vscode.window.showWarningMessage(
                 `"${device.hostname}" löschen?`,
                 {
@@ -184,6 +206,7 @@ export class TopologyViewPanel implements vscode.Disposable {
                 },
                 confirm
             );
+
             if (answer !== confirm) {
                 return;
             }
@@ -195,6 +218,7 @@ export class TopologyViewPanel implements vscode.Disposable {
     async openDevice(deviceId: string): Promise<void> {
         const topology = await this.store.loadTopology(this.topologyId);
         const device = topology.devices.find((d) => d.id === deviceId);
+
         if (!device) {
             return;
         }
@@ -210,6 +234,7 @@ export class TopologyViewPanel implements vscode.Disposable {
 
     private async onMessage(raw: unknown): Promise<void> {
         const message = parseWebviewMessage(raw);
+
         if (!message) {
             console.warn("TopoCheck: ungültige Nachricht aus der Topologieansicht verworfen.");
             return;
@@ -220,7 +245,6 @@ export class TopologyViewPanel implements vscode.Disposable {
         } catch (error) {
             const text = error instanceof Error ? error.message : String(error);
             void vscode.window.showErrorMessage(`TopoCheck: ${text}`);
-            // Optimistische Änderungen der Webview zurücknehmen.
             this.discardPendingOnNextState = true;
             this.scheduleRefresh();
         }
@@ -231,11 +255,15 @@ export class TopologyViewPanel implements vscode.Disposable {
             case "configureDevice": {
                 let error: string | undefined;
                 let validationErrors: ConfigurationFieldError[] | undefined;
+
                 try {
                     await this.store.configureDevice(this.topologyId, message.deviceId, message.configuration);
                 } catch (cause) {
                     error = cause instanceof Error ? cause.message : String(cause);
-                    if (cause instanceof DeviceConfigurationValidationError) { validationErrors = cause.errors; }
+
+                    if (cause instanceof DeviceConfigurationValidationError) {
+                        validationErrors = cause.errors;
+                    }
                 }
                 await this.panel.webview.postMessage({
                     type: "configurationResult",
@@ -243,27 +271,37 @@ export class TopologyViewPanel implements vscode.Disposable {
                 } satisfies ExtensionToWebviewMessage);
                 return;
             }
+
             case "ready":
                 await this.postState();
                 return;
             case "submitTopology":
                 await submitTopology(this.store, this.topologyId, message.mode);
                 return;
+
+            case "confirmTopology":
+                await this.confirmTopology();
+                return;
+
             case "addDevice":
                 await this.store.addDevice(this.topologyId, {
                     type: message.deviceType,
                     position: message.position,
                 });
                 return;
+
             case "moveDevices":
                 await this.store.moveDevices(this.topologyId, message.moves);
                 return;
+
             case "deleteDevice":
                 await this.deleteDevice(message.deviceId);
                 return;
+
             case "renameDevice":
                 await this.renameDevice(message.deviceId);
                 return;
+
             case "openDevice":
                 await this.openDevice(message.deviceId);
                 return;
@@ -285,15 +323,38 @@ export class TopologyViewPanel implements vscode.Disposable {
         }
     }
 
+    private async confirmTopology(): Promise<void> {
+        const topology = await this.store.loadTopology(this.topologyId);
+
+        const routers = topology.devices.filter(
+            (device) => device.type === "router"
+        );
+
+        if (routers.length === 0) {
+            void vscode.window.showWarningMessage(
+                "TopoCheck: Die Topologie enthält keine Router."
+            );
+            return;
+        }
+
+        const generatedCount =
+            await this.configModule.generateForTopology(this.topologyId);
+
+        void vscode.window.showInformationMessage(
+            `TopoCheck: Topologie bestätigt. ${generatedCount} Router-Konfiguration(en) generiert.`
+        );
+    }
+
     /**
-     * Mehrere Store-Events kurz hintereinander (z. B. beim Erzeugen einer Demo-Topologie)
-     * werden zu einer Zustandsnachricht zusammengefasst.
+     * Mehrere Store-Events kurz hintereinander werden zu einer Zustandsnachricht zusammengefasst.
      */
     private scheduleRefresh(): void {
         if (this.refreshScheduled || this.disposed) {
             return;
         }
+
         this.refreshScheduled = true;
+
         setTimeout(() => {
             this.refreshScheduled = false;
             void this.postState();
@@ -304,7 +365,9 @@ export class TopologyViewPanel implements vscode.Disposable {
         if (this.disposed) {
             return;
         }
+
         let topology: Topology;
+
         try {
             topology = await this.store.loadTopology(this.topologyId);
         } catch (error) {
@@ -314,11 +377,13 @@ export class TopologyViewPanel implements vscode.Disposable {
         }
 
         this.panel.title = TopologyViewPanel.titleFor(topology);
+
         const message: ExtensionToWebviewMessage = {
             type: "state",
             topology,
             discardPendingChanges: this.discardPendingOnNextState,
         };
+
         this.discardPendingOnNextState = false;
         await this.panel.webview.postMessage(message);
     }
@@ -328,14 +393,15 @@ export class TopologyViewPanel implements vscode.Disposable {
     private renderHtml(): string {
         const webview = this.panel.webview;
         const nonce = randomBytes(16).toString("base64");
+
         const scriptUri = webview.asWebviewUri(
             vscode.Uri.joinPath(this.extensionUri, "dist", "webview.js")
         );
+
         const styleUri = webview.asWebviewUri(
             vscode.Uri.joinPath(this.extensionUri, "media", "topologyView.css")
         );
 
-        // Strenge CSP: keine Inline-Skripte, nur eigenes Bundle mit Nonce
         const csp = [
             "default-src 'none'",
             `style-src ${webview.cspSource}`,
@@ -364,12 +430,16 @@ export class TopologyViewPanel implements vscode.Disposable {
         if (this.disposed) {
             return;
         }
+
         this.disposed = true;
         TopologyViewPanel.panels.delete(this.topologyId);
+
         if (TopologyViewPanel.lastActive === this) {
             TopologyViewPanel.lastActive = undefined;
         }
+
         this.panel.dispose();
+
         for (const disposable of this.disposables) {
             disposable.dispose();
         }

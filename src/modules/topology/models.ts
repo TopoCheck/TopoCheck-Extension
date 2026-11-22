@@ -68,6 +68,53 @@ export interface DeviceConfig {
     updatedAt: string;
 }
 
+export interface TopologyRipConfiguration {
+    version?: 1 | 2;
+    noAutoSummary?: boolean;
+    networks: {
+        address: string;
+    }[];
+}
+
+export interface TopologyOspfConfiguration {
+    processes: {
+        processId: number;
+        routerId?: string;
+        networks: {
+            address: string;
+            wildcardMask: string;
+            area: string;
+        }[];
+        passiveInterfaceDefault: boolean;
+        passiveInterfaces: Record<string, boolean>;
+    }[];
+}
+
+export interface TopologyDhcpConfiguration {
+  name: string;
+  interfaceName: string;
+  dnsServer?: string;
+  excludedAddresses?: string[];
+}
+
+export interface TopologyStaticRouteConfiguration {
+  destination: string;
+  subnetMask: string;
+  nextHop?: string;
+  outgoingInterface?: string;
+  administrativeDistance?: number;
+}
+
+export interface DeviceProtocol {
+    id: string;
+    type: ProtocolType;
+    enabled: boolean;
+    rip?: TopologyRipConfiguration;
+    ospf?: TopologyOspfConfiguration;
+    dhcp?: TopologyDhcpConfiguration[];
+    staticRoutes?: TopologyStaticRouteConfiguration[];
+}
+
 export interface Device extends DeviceAccessConfiguration {
     id: string;
     topologyId: string;
@@ -96,3 +143,5 @@ export interface Topology {
     connections: Connection[];
     layout: TopologyLayout;
 }
+
+

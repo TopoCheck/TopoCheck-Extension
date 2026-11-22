@@ -26,6 +26,7 @@ export interface DeviceMoveMessage {
 /** Webview -> Extension */
 export type WebviewToExtensionMessage =
     | { type: "ready" }
+    | { type: "confirmTopology" }
     | { type: "addDevice"; deviceType: DeviceType; position: Point }
     | { type: "moveDevices"; moves: DeviceMoveMessage[] }
     | { type: "deleteDevice"; deviceId: string }

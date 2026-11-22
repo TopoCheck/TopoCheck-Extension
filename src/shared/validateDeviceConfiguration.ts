@@ -1,165 +1,465 @@
 import { DeviceType } from "../models/deviceType";
 import { InterfaceType } from "../models/interfaceType";
-import { isValidIpv4Address, isValidSubnetMask } from "../models/ipv4";
-import { compatibleProtocols } from "../models/networkDevice";
+import { NetworkDevice, compatibleProtocols } from "../models/networkDevice";
+import { NetworkInterface } from "../models/networkInterface";
+import { NetworkProtocol } from "../models/networkProtocol";
 import { ProtocolType } from "../models/protocolType";
-import { isHostnameTaken, validateHostname } from "../modules/topology/hostname";
-import type { Device } from "../modules/topology/models";
-import type { DeviceConfiguration } from "./deviceConfiguration";
-import { RESERVED_VLAN_IDS, VLAN_NAME_PATTERN } from "./switchingSettings";
+import type { Device, PortMode, ProtocolSettings } from "../modules/topology/models";
+import { DeviceConfigurationValidationError, validateDeviceConfiguration } from "./validateDeviceConfiguration";
+import type { DeviceAccessConfiguration } from "../models/deviceAccessConfiguration";
+import { RipProtocol, OspfProtocol, StaticRouteProtocol, DhcpProtocol } from "../models/ciscoProtocols";
 
-export interface ConfigurationFieldError {
-    /** Indexed field paths, e.g. interfaces.0.ipAddress; suitable for any UI. */
-    field: string;
-    code: string;
-    message: string;
+export interface DeviceConfiguration extends DeviceAccessConfiguration {
+    label?: string;
+    hostname: string;
+    interfaces: {
+        id: string;
+        enabled: boolean;
+        ipAddress: string;
+        subnetMask: string;
+        description?: string;
+        layer?: 2 | 3;
+        accessVlan?: number;
+        portMode?: PortMode;
+    }[];
+    protocols: {
+        type: ProtocolType;
+        enabled: boolean;
+        settings?: ProtocolSettings;
+        rip?: {
+            version: 1 | 2;
+            noAutoSummary: boolean;
+            networks: { address: string }[];
+        };
+        ospf?: {
+            processes: {
+                processId: number;
+                routerId?: string;
+                networks: {
+                    address: string;
+                    wildcardMask: string;
+                    area: string;
+                }[];
+                passiveInterfaceDefault: boolean;
+                passiveInterfaces: Record<string, boolean>;
+            }[];
+        };
+        dhcp?: {
+            pools: {
+                name: string;
+                interfaceName: string;
+                dnsServer?: string;
+                excludedAddresses?: string[];
+            }[];
+        };
+        staticRoutes?: {
+            routes: {
+                destination: string;
+                subnetMask: string;
+                nextHop?: string;
+                outgoingInterface?: string;
+                administrativeDistance?: number;
+            }[];
+        };
+    }[];
 }
 
-export class DeviceConfigurationValidationError extends Error {
-    constructor(readonly errors: ConfigurationFieldError[]) {
-        super(errors.map((error) => error.message).join("\n"));
-        this.name = "DeviceConfigurationValidationError";
-    }
+const PORT_MODES: readonly string[] = ["auto", "access", "trunk"];
+const ROOT_ROLES: readonly string[] = ["auto", "primary", "secondary", "none"];
+const LACP_MODES: readonly string[] = ["active", "passive"];
+const MAX_VLANS = 256;
+
+const isInt = (value: unknown): value is number => typeof value === "number" && Number.isInteger(value);
+
+/** Nur die Struktur wird geprüft; Wertebereiche prüft validateDeviceConfiguration. */
+function isProtocolSettings(value: unknown): value is ProtocolSettings {
+    if (value === undefined) { return true; }
+    if (!value || typeof value !== "object") { return false; }
+    const data = value as Record<string, unknown>;
+    return (data.vlans === undefined || (Array.isArray(data.vlans) && data.vlans.length <= MAX_VLANS &&
+        data.vlans.every((vlan: unknown) => {
+            const item = vlan as Record<string, unknown> | null;
+            return !!item && isInt(item.id) && typeof item.name === "string" && item.name.length <= 64;
+        }))) &&
+        (data.nativeVlan === undefined || isInt(data.nativeVlan)) &&
+        (data.rootRole === undefined || ROOT_ROLES.includes(data.rootRole as string)) &&
+        (data.lacpMode === undefined || LACP_MODES.includes(data.lacpMode as string));
 }
 
-/** Pure semantic validation: collect all field errors, never mutate data or access VS Code. */
-export function validateDeviceConfiguration(device: Device | undefined, data: DeviceConfiguration,
-    otherHostnames: readonly string[] = []): ConfigurationFieldError[] {
-    const errors: ConfigurationFieldError[] = [];
-    const add = (field: string, code: string, message: string) => { errors.push({ field, code, message }); };
-    if (!device) {
-        add("deviceId", "device-not-found", "Das Gerät existiert nicht mehr. Bitte die Topologie erneut öffnen.");
-        return errors;
+export { compatibleProtocols };
+
+function isRipConfiguration(value: unknown): boolean {
+    if (!value || typeof value !== "object") { return false; }
+
+    const config = value as Record<string, unknown>;
+
+    return (config.version === undefined ||
+        config.version === 1 ||
+        config.version === 2) &&
+        (config.noAutoSummary === undefined ||
+            typeof config.noAutoSummary === "boolean") &&
+        Array.isArray(config.networks) &&
+        config.networks.length <= 1024 &&
+        config.networks.every((network: unknown) => {
+            if (!network || typeof network !== "object") { return false; }
+            const item = network as Record<string, unknown>;
+            return typeof item.address === "string" &&
+                item.address.length <= 32;
+        });
+}
+
+function isOspfConfiguration(value: unknown): boolean {
+    if (!value || typeof value !== "object") { return false; }
+
+    const config = value as Record<string, unknown>;
+
+    return Array.isArray(config.processes) &&
+        config.processes.length <= 32 &&
+        config.processes.every((process: unknown) => {
+            if (!process || typeof process !== "object") { return false; }
+            const item = process as Record<string, unknown>;
+
+            return Number.isInteger(item.processId) &&
+                (item.routerId === undefined ||
+                    (typeof item.routerId === "string" && item.routerId.length <= 32)) &&
+                Array.isArray(item.networks) &&
+                item.networks.length <= 1024 &&
+                item.networks.every((network: unknown) => {
+                    if (!network || typeof network !== "object") { return false; }
+                    const entry = network as Record<string, unknown>;
+
+                    return typeof entry.address === "string" &&
+                        entry.address.length <= 32 &&
+                        typeof entry.wildcardMask === "string" &&
+                        entry.wildcardMask.length <= 32 &&
+                        typeof entry.area === "string" &&
+                        entry.area.length <= 32;
+                }) &&
+                typeof item.passiveInterfaceDefault === "boolean" &&
+                !!item.passiveInterfaces &&
+                typeof item.passiveInterfaces === "object" &&
+                !Array.isArray(item.passiveInterfaces) &&
+                Object.entries(item.passiveInterfaces).every(
+                    ([name, passive]) =>
+                        name.length <= 128 && typeof passive === "boolean"
+                );
+        });
+}
+
+function isDhcpConfiguration(value: unknown): boolean {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+        return false;
     }
-    if (!device.id.trim()) { add("deviceId", "device-id-empty", "Die Geräte-ID darf nicht leer sein."); }
-    const validDeviceType = Object.values(DeviceType).includes(device.type as DeviceType);
-    if (!validDeviceType) { add("deviceId", "device-type-invalid", "Der Gerätetyp wird nicht unterstützt."); }
+
+    const config = value as Record<string, unknown>;
+
+    return Array.isArray(config.pools) &&
+        config.pools.length <= 1024 &&
+        config.pools.every((pool: unknown) => {
+            if (!pool || typeof pool !== "object") {
+                return false;
+            }
+
+            const item = pool as Record<string, unknown>;
+
+            return typeof item.name === "string" &&
+                item.name.length <= 128 &&
+                typeof item.interfaceName === "string" &&
+                item.interfaceName.length <= 128 &&
+                (item.dnsServer === undefined ||
+                    (typeof item.dnsServer === "string" &&
+                        item.dnsServer.length <= 32)) &&
+                (item.excludedAddresses === undefined ||
+                    (Array.isArray(item.excludedAddresses) &&
+                        item.excludedAddresses.length <= 1024 &&
+                        item.excludedAddresses.every(
+                            (address) =>
+                                typeof address === "string" &&
+                                address.length <= 32
+                        )));
+        });
+}
+
+function isStaticRoutesConfiguration(value: unknown): boolean {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+        return false;
+    }
+
+    const config = value as Record<string, unknown>;
+
+    return Array.isArray(config.routes) &&
+        config.routes.length <= 1024 &&
+        config.routes.every((route: unknown) => {
+            if (!route || typeof route !== "object") {
+                return false;
+            }
+
+            const item = route as Record<string, unknown>;
+
+            return typeof item.destination === "string" &&
+                item.destination.length <= 32 &&
+                typeof item.subnetMask === "string" &&
+                item.subnetMask.length <= 32 &&
+                (item.nextHop === undefined ||
+                    (typeof item.nextHop === "string" &&
+                        item.nextHop.length <= 32)) &&
+                (item.outgoingInterface === undefined ||
+                    (typeof item.outgoingInterface === "string" &&
+                        item.outgoingInterface.length <= 128)) &&
+                (item.administrativeDistance === undefined ||
+                    (Number.isInteger(item.administrativeDistance) &&
+                        (item.administrativeDistance as number) >= 1 &&
+                        (item.administrativeDistance as number) <= 255));
+        });
+}
+
+/** Runtime validation at the Webview boundary; semantic checks follow before saving. */
+export function isDeviceConfiguration(value: unknown): value is DeviceConfiguration {
+    if (!value || typeof value !== "object") { return false; }
+    const data = value as Record<string, unknown>;
+    return typeof data.hostname === "string" && data.hostname.length <= 253 &&
+        ["label", "domainName", "username", "enableSecret", "consolePassword", "vtyPassword", "banner"]
+            .every((key) => data[key] === undefined || (typeof data[key] === "string" && (data[key] as string).length <= 8192)) &&
+        Array.isArray(data.interfaces) && data.interfaces.length <= 1024 &&
+        data.interfaces.every((item: unknown) => {
+            if (!item || typeof item !== "object") { return false; }
+            const iface = item as Record<string, unknown>;
+            return typeof iface.id === "string" && iface.id.length <= 128 &&
+                typeof iface.enabled === "boolean" &&
+                (iface.description === undefined || (typeof iface.description === "string" && iface.description.length <= 4096)) &&
+                (iface.layer === undefined || iface.layer === 2 || iface.layer === 3) &&
+                typeof iface.ipAddress === "string" && iface.ipAddress.length <= 32 &&
+                typeof iface.subnetMask === "string" && iface.subnetMask.length <= 32 &&
+                (iface.accessVlan === undefined || isInt(iface.accessVlan)) &&
+                (iface.portMode === undefined || PORT_MODES.includes(iface.portMode as string));
+        }) && Array.isArray(data.protocols) && data.protocols.length <= 32 &&
+        data.protocols.every((item: unknown) => {
+            if (!item || typeof item !== "object") { return false; }
+            const protocol = item as Record<string, unknown>;
+            return Object.values(ProtocolType).includes(protocol.type as ProtocolType) &&
+                typeof protocol.enabled === "boolean" &&
+                isProtocolSettings(protocol.settings) &&
+                (protocol.rip === undefined || isRipConfiguration(protocol.rip)) &&
+                (protocol.ospf === undefined || isOspfConfiguration(protocol.ospf)) &&
+                (protocol.dhcp === undefined || isDhcpConfiguration(protocol.dhcp)) &&
+                (protocol.staticRoutes === undefined || isStaticRoutesConfiguration(protocol.staticRoutes)) &&
+                (protocol.type === ProtocolType.Rip
+                    ? protocol.ospf === undefined
+                    : protocol.rip === undefined) &&
+                (protocol.type === ProtocolType.Ospf
+                    ? protocol.rip === undefined
+                    : protocol.ospf === undefined) &&
+                (protocol.type === ProtocolType.Dhcp
+                    ? protocol.rip === undefined &&
+                      protocol.ospf === undefined &&
+                      protocol.staticRoutes === undefined
+                    : protocol.dhcp === undefined) &&
+                (protocol.type === ProtocolType.StaticRoute
+                    ? protocol.rip === undefined &&
+                      protocol.ospf === undefined &&
+                      protocol.dhcp === undefined
+                    : protocol.staticRoutes === undefined);
+        });
+}
+
+export function configurationOf(device: Device, connectedInterfaceIds: readonly string[] = []): DeviceConfiguration {
+    return {
+        label: device.label,
+        hostname: device.hostname,
+        domainName: device.domainName ?? "", username: device.username ?? "",
+        enableSecret: device.enableSecret ?? "", consolePassword: device.consolePassword ?? "",
+        vtyPassword: device.vtyPassword ?? "", banner: device.banner ?? "",
+        interfaces: device.interfaces.map((iface) => ({
+            id: iface.id, enabled: iface.enabled ?? connectedInterfaceIds.includes(iface.id),
+            ipAddress: iface.ipAddress ?? "", subnetMask: iface.subnetMask ?? "",
+            description: iface.description ?? "", layer: iface.layer ?? (device.type === "switch" ? 2 : 3),
+            ...(device.type === "switch" ? { accessVlan: iface.accessVlan, portMode: iface.portMode ?? "auto" } : {})
+        })),
+        protocols: (device.protocols ?? []).map((protocol) => {
+            const result: DeviceConfiguration["protocols"][number] = {
+                type: protocol.type,
+                enabled: protocol.enabled,
+                // H3b: VLAN-, STP- und EtherChannel-Eingaben aus dem Formular
+                ...(protocol.settings ? { settings: structuredClone(protocol.settings) } : {})
+            };
+
+            if (protocol.rip !== undefined) {
+                result.rip = {
+                    version: protocol.rip.version ?? 2,
+                    noAutoSummary: protocol.rip.noAutoSummary ?? true,
+                    networks: protocol.rip.networks.map((network) => ({
+                        address: network.address
+                    }))
+                };
+            }
+
+            if (protocol.ospf !== undefined) {
+                result.ospf = {
+                    processes: protocol.ospf.processes.map((process) => ({
+                        processId: process.processId,
+                        routerId: process.routerId,
+                        networks: process.networks.map((network) => ({
+                            address: network.address,
+                            wildcardMask: network.wildcardMask,
+                            area: network.area
+                        })),
+                        passiveInterfaceDefault: process.passiveInterfaceDefault,
+                        passiveInterfaces: { ...process.passiveInterfaces }
+                    }))
+                };
+            }
+
+            if (protocol.dhcp !== undefined) {
+                result.dhcp = {
+                    pools: protocol.dhcp.map((pool) => ({
+                        name: pool.name,
+                        interfaceName: pool.interfaceName,
+                        dnsServer: pool.dnsServer,
+                        excludedAddresses: pool.excludedAddresses
+                            ? [...pool.excludedAddresses]
+                            : undefined
+                    }))
+                };
+            }
+
+            if (protocol.staticRoutes !== undefined) {
+                result.staticRoutes = {
+                    routes: protocol.staticRoutes.map((route) => ({
+                        destination: route.destination,
+                        subnetMask: route.subnetMask,
+                        nextHop: route.nextHop,
+                        outgoingInterface: route.outgoingInterface,
+                        administrativeDistance: route.administrativeDistance
+                    }))
+                };
+            }
+
+            return result;
+        })
+    };
+}
+
+/** Rehydrates a persisted device as real H1c classes, including defaults for old files. */
+export function toNetworkDevice(device: Device, otherHostnames: string[] = [], connectedInterfaceIds: readonly string[] = []): NetworkDevice {
+    return buildConfiguredDevice(device, configurationOf(device, connectedInterfaceIds), otherHostnames);
+}
+
+/** Builds a validated H1c model without mutating the stored device or its IDs. */
+export function buildConfiguredDevice(device: Device, data: DeviceConfiguration,
+    otherHostnames: string[]): NetworkDevice {
+    if (!isDeviceConfiguration(data)) {
+        throw new DeviceConfigurationValidationError([
+            { field: "configuration", code: "configuration-invalid", message: "Ungültige Konfigurationsdaten." }
+        ]);
+    }
+    const errors = validateDeviceConfiguration(device, data, otherHostnames);
+    if (errors.length) { throw new DeviceConfigurationValidationError(errors); }
     const hostname = data.hostname.trim();
-    const hostnameError = validateHostname(hostname);
-    if (hostnameError) { add("hostname", "hostname-invalid", hostnameError); }
-    else if (isHostnameTaken(hostname, otherHostnames)) {
-        add("hostname", "hostname-taken", `Der Hostname "${hostname}" ist bereits vergeben.`);
-    }
-    if (data.label !== undefined && (!data.label.trim() || data.label.trim().length > 128)) {
-        add("label", "label-invalid", "Der Name muss ausgefüllt und darf höchstens 128 Zeichen lang sein.");
-    }
-    const domain = data.domainName?.trim();
-    if (domain && (domain.length > 253 || !domain.split(".").every((part) =>
-        /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$/.test(part)))) {
-        add("domainName", "domain-name-invalid", "Bitte einen gültigen Domain-Namen angeben, z. B. schule.at.");
-    }
-    if (data.username && (data.username.trim().length > 64 || /\s/.test(data.username.trim()))) {
-        add("username", "username-invalid", "Der Benutzername darf höchstens 64 Zeichen und keine Leerzeichen enthalten.");
-    }
-    for (const key of ["enableSecret", "consolePassword", "vtyPassword"] as const) {
-        if (data[key] && (data[key]!.length > 128 || /[\x00-\x1f\x7f]/.test(data[key]!))) {
-            add(key, "password-invalid", "Das Passwort darf höchstens 128 Zeichen und keine Steuerzeichen enthalten.");
-        }
-    }
-    if (data.banner && (data.banner.length > 4096 || /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/.test(data.banner))) {
-        add("banner", "banner-invalid", "Der Banner darf höchstens 4096 Zeichen und keine Steuerzeichen außer Zeilenumbrüchen/Tabulatoren enthalten.");
-    }
-
-    const ids = new Set<string>();
-    const names = new Set<string>();
-    data.interfaces.forEach((input, index) => {
-        const field = `interfaces.${index}`;
-        const original = device.interfaces.find((iface) => iface.id === input.id && iface.deviceId === device.id);
-        if (!original) {
-            add(`${field}.id`, "interface-not-found", "Das ausgewählte Interface gehört nicht zu diesem Gerät oder existiert nicht mehr.");
-        }
-        if (ids.has(input.id)) { add(`${field}.id`, "interface-duplicate", "Ein Interface darf nur einmal ausgewählt werden."); }
-        ids.add(input.id);
-        const name = original?.name ?? input.id;
-        if (original) {
-            if (!original.id.trim()) { add(`${field}.id`, "interface-id-empty", "Die Interface-ID darf nicht leer sein."); }
-            if (!original.name.trim() || names.has(original.name.trim())) {
-                add(`${field}.id`, "interface-name-invalid", "Interface-Namen müssen ausgefüllt und pro Gerät eindeutig sein.");
-            }
-            names.add(original.name.trim());
-            if (original.type !== undefined && !Object.values(InterfaceType).includes(original.type)) {
-                add(`${field}.id`, "interface-type-invalid", `${name}: Der Interfacetyp wird nicht unterstützt.`);
-            }
-        }
+    const model = new NetworkDevice({
+        id: device.id, hostname, type: device.type as DeviceType,
+        domainName: data.domainName?.trim() || undefined, username: data.username?.trim() || undefined,
+        enableSecret: data.enableSecret || undefined, consolePassword: data.consolePassword || undefined,
+        vtyPassword: data.vtyPassword || undefined, banner: data.banner || undefined
+    });
+    for (const input of data.interfaces) {
+        const original = device.interfaces.find((iface) => iface.id === input.id)!;
         const ip = input.ipAddress.trim();
         const mask = input.subnetMask.trim();
-        if (input.description && (input.description.length > 240 || /[\x00-\x1f\x7f]/.test(input.description))) {
-            add(`${field}.description`, "description-invalid", `${name}: Die Beschreibung darf höchstens 240 Zeichen und keine Steuerzeichen enthalten.`);
-        }
-        if (input.layer !== undefined && input.layer !== 2 && input.layer !== 3) {
-            add(`${field}.layer`, "layer-invalid", `${name}: Bitte Layer 2 oder Layer 3 auswählen.`);
-        }
-        if (ip && !mask) {
-            add(`${field}.subnetMask`, "subnet-mask-required", `${name}: Bitte zur IP-Adresse eine Subnetzmaske angeben.`);
-        }
-        if (mask && !ip) {
-            add(`${field}.ipAddress`, "ip-address-required", `${name}: Bitte zur Subnetzmaske eine IP-Adresse angeben.`);
-        }
-        if (ip && !isValidIpv4Address(ip)) {
-            add(`${field}.ipAddress`, "ip-address-invalid", `${name}: Ungültige IPv4-Adresse. Beispiel: 192.168.1.10.`);
-        }
-        if (mask && !isValidSubnetMask(mask)) {
-            add(`${field}.subnetMask`, "subnet-mask-invalid", `${name}: Ungültige Subnetzmaske; Netzbits müssen zusammenhängend sein (z. B. 255.255.255.0).`);
-        }
-    });
-    if (device.interfaces.some((iface) => !ids.has(iface.id))) {
-        add("interfaces", "interfaces-incomplete", "Die Interfaceauswahl ist unvollständig oder veraltet. Bitte das Formular erneut öffnen.");
+        model.addInterface(new NetworkInterface({
+            id: original.id, name: original.name, type: original.type ?? interfaceTypeOf(original.name),
+            enabled: input.enabled, ipAddress: ip || undefined, subnetMask: mask || undefined,
+            description: input.description?.trim() || undefined,
+            layer: input.layer ?? original.layer ?? (device.type === "switch" ? 2 : 3)
+        }));
     }
+    for (const protocol of data.protocols) {
+        const id = device.protocols?.find(
+            (item) => item.type === protocol.type
+        )?.id ?? `${device.id}:${protocol.type}`;
 
-    const protocols = new Set<ProtocolType>();
-    data.protocols.forEach((protocol, index) => {
-        const field = `protocols.${index}.type`;
-        if (!Object.values(ProtocolType).includes(protocol.type)) {
-            add(field, "protocol-unknown", "Das ausgewählte Protokoll wird nicht unterstützt.");
-        } else if (validDeviceType && !compatibleProtocols[device.type as DeviceType].includes(protocol.type)) {
-            add(field, "protocol-incompatible", `Das Protokoll ${protocol.type.toUpperCase()} ist für dieses Gerät nicht verfügbar.`);
+        if (protocol.type === ProtocolType.Rip) {
+            const rip = new RipProtocol(id);
+            if (protocol.rip !== undefined) {
+                rip.version = protocol.rip.version ?? 2;
+                rip.noAutoSummary = protocol.rip.noAutoSummary ?? true;
+                rip.networks.push(...protocol.rip.networks);
+            }
+            if (protocol.enabled) {
+                rip.enable();
+            } else {
+                rip.disable();
+            }
+            model.addProtocol(rip);
+        } else if (protocol.type === ProtocolType.Ospf) {
+            const ospf = new OspfProtocol(id);
+            if (protocol.ospf !== undefined) {
+                ospf.processes.push(
+                    ...protocol.ospf.processes.map((process) => ({
+                        ...process,
+                        networks: process.networks.map((network) => ({ ...network })),
+                        passiveInterfaces: { ...process.passiveInterfaces }
+                    }))
+                );
+            }
+            if (protocol.enabled) {
+                ospf.enable();
+            } else {
+                ospf.disable();
+            }
+            model.addProtocol(ospf);
+            } else if (protocol.type === ProtocolType.Dhcp) {
+            const dhcp = new DhcpProtocol(id);
+
+            if (protocol.dhcp !== undefined) {
+                dhcp.pools.push(
+                    ...protocol.dhcp.pools.map((pool) => ({
+                        ...pool,
+                        excludedAddresses: pool.excludedAddresses
+                            ? [...pool.excludedAddresses]
+                            : undefined
+                    }))
+                );
+            }
+
+            if (protocol.enabled) {
+                dhcp.enable();
+            } else {
+                dhcp.disable();
+            }
+
+            model.addProtocol(dhcp);
+        } else if (protocol.type === ProtocolType.StaticRoute) {
+            const staticRoutes = new StaticRouteProtocol(id);
+
+            if (protocol.staticRoutes !== undefined) {
+                staticRoutes.routes.push(
+                    ...protocol.staticRoutes.routes.map((route) => ({
+                        ...route
+                    }))
+                );
+            }
+
+            if (protocol.enabled) {
+                staticRoutes.enable();
+            } else {
+                staticRoutes.disable();
+            }
+
+            model.addProtocol(staticRoutes);
+        } else {
+            model.addProtocol(new NetworkProtocol({
+                id,
+                ...protocol
+            }));
         }
-        if (protocols.has(protocol.type)) { add(field, "protocol-duplicate", "Ein Protokoll darf nur einmal ausgewählt werden."); }
-        protocols.add(protocol.type);
-    });
-    validateSwitching(device, data, add);
-    return errors;
+    }
+    return model;
 }
 
-/** H3b: VLAN-Liste, Native VLAN und Port-Zuordnung eines Switches. */
-function validateSwitching(device: Device, data: DeviceConfiguration,
-    add: (field: string, code: string, message: string) => void): void {
-    const isSwitch = device.type === DeviceType.Switch;
-    if (data.protocols.some((p) => p.type === ProtocolType.Stp) && data.protocols.some((p) => p.type === ProtocolType.Rstp)) {
-        add("protocols", "stp-mode-conflict", "Bitte entweder STP oder RSTP auswählen – ein Switch läuft immer nur in einem Modus.");
-    }
-
-    const vlanIndex = data.protocols.findIndex((p) => p.type === ProtocolType.Vlan);
-    const vlanSettings = vlanIndex >= 0 ? data.protocols[vlanIndex].settings : undefined;
-    const defined = new Set<number>();
-    vlanSettings?.vlans?.forEach((vlan, index) => {
-        const field = `protocols.${vlanIndex}.vlans.${index}`;
-        if (vlan.id < 2 || vlan.id > 4094 || RESERVED_VLAN_IDS.includes(vlan.id)) {
-            add(`${field}.id`, "vlan-id-invalid", `VLAN ${vlan.id}: erlaubt sind 2–4094 ohne 999 und 1002–1005.`);
-        } else if (defined.has(vlan.id)) {
-            add(`${field}.id`, "vlan-id-duplicate", `VLAN ${vlan.id} ist doppelt eingetragen.`);
-        }
-        defined.add(vlan.id);
-        if (!VLAN_NAME_PATTERN.test(vlan.name)) {
-            add(`${field}.name`, "vlan-name-invalid", `VLAN ${vlan.id}: Name mit 1–32 Zeichen (Buchstaben, Ziffern, _ oder -).`);
-        }
-    });
-    const native = vlanSettings?.nativeVlan;
-    if (native !== undefined && (native < 1 || native > 4094 || native === 999 || (native >= 1002 && native <= 1005))) {
-        add(`protocols.${vlanIndex}.nativeVlan`, "native-vlan-invalid", "Native VLAN: erlaubt sind 1–4094 ohne 999 und 1002–1005.");
-    }
-
-    data.interfaces.forEach((iface, index) => {
-        const field = `interfaces.${index}`;
-        if (!isSwitch) {
-            if (iface.accessVlan !== undefined || (iface.portMode !== undefined && iface.portMode !== "auto")) {
-                add(`${field}.accessVlan`, "switchport-not-switch", "VLAN-Zuordnungen sind nur auf Switch-Ports möglich.");
-            }
-            return;
-        }
-        // Native VLAN zählt nicht: Endgeräte darin wären ungetaggt auf jedem Trunk erreichbar.
-        if (iface.accessVlan !== undefined && iface.accessVlan !== 1 && !defined.has(iface.accessVlan)) {
-            add(`${field}.accessVlan`, "access-vlan-unknown", `VLAN ${iface.accessVlan} ist im VLAN-Protokoll dieses Switches nicht angelegt.`);
-        }
-    });
+function interfaceTypeOf(name: string): InterfaceType {
+    if (/^(gigabit|gi)/i.test(name)) { return InterfaceType.GigabitEthernet; }
+    if (/^(fast|fa)/i.test(name)) { return InterfaceType.FastEthernet; }
+    if (/^(loopback|lo)/i.test(name)) { return InterfaceType.Loopback; }
+    if (/^vlan/i.test(name)) { return InterfaceType.Vlan; }
+    return InterfaceType.Ethernet;
 }

@@ -14,12 +14,14 @@ export function activate(context: vscode.ExtensionContext): void {
   const topologyModule = new TopologyModule(context);
 
   registry.register(topologyModule);
-  registry.register(new ConfigModule());
   registry.register(new DiagnosticsModule());
   registry.register(new ExternalApiModule());
   registry.register(new ExampleModule());
 
   registry.initializeAll();
+
+  const configModule = new ConfigModule(topologyModule.store);
+  topologyModule.setConfigModule(configModule);
 
   context.subscriptions.push(topologyModule);
 
@@ -84,4 +86,4 @@ export function activate(context: vscode.ExtensionContext): void {
   );
 }
 
-export function deactivate(): void { }
+export function deactivate(): void {}

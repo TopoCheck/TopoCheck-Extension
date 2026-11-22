@@ -1,6 +1,15 @@
 import {
-  DeviceType, NetworkInterface, NetworkProtocol, OspfProcessConfiguration,
-  OspfProtocol, StaticRouteConfiguration, StaticRouteProtocol, VlanConfiguration, VlanProtocol
+  DeviceType,
+  NetworkInterface,
+  NetworkProtocol,
+  OspfProcessConfiguration,
+  OspfProtocol,
+  RipNetworkConfiguration,
+  RipProtocol,
+  StaticRouteConfiguration,
+  StaticRouteProtocol,
+  VlanConfiguration,
+  VlanProtocol
 } from "../models";
 
 export type ReportDiagnostic = (severity: "warning" | "error", message: string) => void;
@@ -9,31 +18,44 @@ export type ReportDiagnostic = (severity: "warning" | "error", message: string) 
 export class CiscoIosProtocolParser {
   private readonly vlan: VlanProtocol;
   private readonly ospf: OspfProtocol;
+  private readonly rip: RipProtocol;
   private readonly routes: StaticRouteProtocol;
+
   private currentVlan: VlanConfiguration | undefined;
   private currentOspf: OspfProcessConfiguration | undefined;
+  private currentRip = false;
+  private ripVersion: number | undefined;
   private blocked = false;
 
   public constructor(private readonly deviceType: DeviceType, deviceId: string) {
     this.vlan = new VlanProtocol(`${deviceId}:vlan`);
     this.ospf = new OspfProtocol(`${deviceId}:ospf`);
     this.routes = new StaticRouteProtocol(`${deviceId}:static-route`);
+    this.rip = new RipProtocol(`${deviceId}:rip`);
   }
 
   public resetContext(): void {
     this.currentVlan = undefined;
     this.currentOspf = undefined;
+    this.currentRip = false;
     this.blocked = false;
   }
 
-  public get context(): "vlan" | "ospf" | "global" {
-    return this.currentVlan ? "vlan" : this.currentOspf ? "ospf" : "global";
+  public get context(): "vlan" | "ospf" | "rip" | "global" {
+    return this.currentVlan
+      ? "vlan"
+      : this.currentOspf
+        ? "ospf"
+        : this.currentRip
+          ? "rip"
+          : "global";
   }
 
   public get protocols(): NetworkProtocol[] {
     return [
       ...(this.vlan.vlans.length ? [this.vlan] : []),
       ...(this.ospf.processes.length ? [this.ospf] : []),
+      ...(this.rip.networks.length ? [this.rip] : []),
       ...(this.routes.routes.length ? [this.routes] : [])
     ];
   }
@@ -59,6 +81,19 @@ export class CiscoIosProtocolParser {
         this.vlan.vlans.push(this.currentVlan);
       }
       this.blocked = false;
+      return true;
+    }
+    if (/^router\s+rip$/.test(command)) {
+      this.resetContext();
+      this.blocked = true;
+
+      if (this.deviceType !== DeviceType.Router) {
+        report("error", "RIP requires a router in the H1c model.");
+      } else {
+        this.currentRip = true;
+        this.blocked = false;
+      }
+
       return true;
     }
     if (/^router\s+ospf(?:\s|$)/.test(command)) {
@@ -92,7 +127,8 @@ export class CiscoIosProtocolParser {
       return true;
     }
 
-    const childCommand = /^(?:name|network|router-id|(?:no\s+)?passive-interface)(?:\s|$)/.test(command);
+    const childCommand =
+      /^(?:name|network|router-id|version|no\s+auto-summary|(?:no\s+)?passive-interface)(?:\s|$)/.test(command);
     if (!indented && !childCommand) {
       this.resetContext();
     }
@@ -111,6 +147,10 @@ export class CiscoIosProtocolParser {
     }
     if (this.currentOspf) {
       this.parseOspf(command, this.currentOspf, report);
+      return true;
+    }
+    if (this.currentRip) {
+      this.parseRip(command, report);
       return true;
     }
     if (childCommand) {
@@ -157,9 +197,71 @@ export class CiscoIosProtocolParser {
     }
   }
 
+  private parseRip(command: string, report: ReportDiagnostic): void {
+    const versionMatch = /^version\s+([12])$/.exec(command);
+
+    if (versionMatch) {
+      if (this.ripVersion !== undefined) {
+        report("error", "Die RIP-Version wurde bereits definiert.");
+        return;
+      }
+
+      this.ripVersion = Number(versionMatch[1]);
+      return;
+    }
+
+    if (command === "no auto-summary") {
+      return;
+    }
+
+    const match = /^network\s+(\S+)$/.exec(command);
+
+    if (match && isIpv4(match[1])) {
+      const network: RipNetworkConfiguration = {
+        address: match[1]
+      };
+
+      if (this.rip.networks.some(
+        (item) => item.address === network.address
+      )) {
+        report(
+          "error",
+          `Doppelte RIP-Netzwerkanweisung: ${network.address} wurde bereits definiert.`
+        );
+        return;
+      }
+
+      this.rip.networks.push(network);
+      return;
+    }
+
+    if (/^version(?:\s|$)/.test(command)) {
+      report(
+        "error",
+        "Ungültige RIP-Version. Erwartet: version 1 oder version 2."
+      );
+    } else if (/^network(?:\s|$)/.test(command)) {
+      report(
+        "error",
+        "Ungültiges RIP-Netzwerk. Erwartet: network <IPv4-Adresse>."
+      );
+    } else {
+      report("warning", `Nicht unterstützter RIP-Befehl: ${command}`);
+    }
+  }
+
   private parseOspf(command: string, process: OspfProcessConfiguration, report: ReportDiagnostic): void {
     let match = /^router-id\s+(\S+)$/.exec(command);
+
     if (match && isIpv4(match[1])) {
+      if (process.routerId !== undefined) {
+        report(
+          "error",
+          "Die OSPF-Router-ID wurde bereits definiert."
+        );
+        return;
+      }
+
       process.routerId = match[1];
       return;
     }
@@ -167,9 +269,20 @@ export class CiscoIosProtocolParser {
     if (match && isIpv4(match[1]) && isWildcardMask(match[2]) && isArea(match[3])) {
       const area = normalizeArea(match[3]);
       const network = { address: match[1], wildcardMask: match[2], area };
-      if (!process.networks.some((item) => JSON.stringify(item) === JSON.stringify(network))) {
-        process.networks.push(network);
+      if (process.networks.some(
+        (item) =>
+          item.address === network.address &&
+          item.wildcardMask === network.wildcardMask &&
+          item.area === network.area
+      )) {
+        report(
+          "error",
+          `Doppelte OSPF-Netzwerkanweisung: ${network.address} ${network.wildcardMask} area ${network.area} wurde bereits definiert.`
+        );
+        return;
       }
+
+      process.networks.push(network);
       return;
     }
     match = /^(no\s+)?passive-interface\s+(\S+)$/.exec(command);

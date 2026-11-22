@@ -14,6 +14,8 @@ const PROTOCOL_LABEL: Partial<Record<ProtocolType, string>> = {
     [ProtocolType.EtherChannel]: "EtherChannel"
 };
 const MIN_WIDTH = 280;
+/** Diese Protokolle haben eigene Formulare (Routing, DHCP); alle anderen nutzen die aufklappbare Protokollzeile. */
+const ROUTING_PROTOCOLS: readonly ProtocolType[] = [ProtocolType.Rip, ProtocolType.Ospf, ProtocolType.Dhcp, ProtocolType.StaticRoute];
 
 export interface FormWidthStore { initialWidth?: number; saveWidth(width: number): void }
 
@@ -362,8 +364,11 @@ export class DeviceConfigurationForm {
         this.updateInterfaceVisibility();
         content.append(interfaces);
 
+
         const protocols = section("Protokolle");
-        const protocolControls: ProtocolControl[] = compatibleProtocols[device.type as DeviceType].map((type: ProtocolType) => {
+        const deviceProtocols: readonly ProtocolType[] = compatibleProtocols[device.type as DeviceType];
+        // H3b: VLAN, STP, RSTP, EtherChannel als Zeile "☐ Name … Aktiviert" mit aufklappbarem Formular
+        const protocolControls: ProtocolControl[] = deviceProtocols.filter((type) => !ROUTING_PROTOCOLS.includes(type)).map((type: ProtocolType) => {
             const saved = draft.protocols.find((item) => item.type === type);
             const settings = saved?.settings ?? defaultSettings(type);
             const item = this.protocolItem(type, saved !== undefined, settings);
@@ -385,9 +390,615 @@ export class DeviceConfigurationForm {
             rstp.selected.addEventListener("change", () => { if (rstp.selected.checked) { setChecked(stp.selected, false); } });
         }
         refreshSwitchPorts();
-        if (!protocolControls.length) { protocols.append(document.createTextNode("Keine Protokolle für diesen Gerätetyp.")); }
+
+        // Protokolle mit eigenen Formularen (RIP, OSPF, DHCP, statische Routen)
+        const routingControls = deviceProtocols.filter((type) => ROUTING_PROTOCOLS.includes(type)).map((type: ProtocolType) => {
+            const saved = draft.protocols.find((item) => item.type === type);
+            const savedProcesses = saved?.ospf?.processes ?? [];
+
+            const enabled = input("checkbox");
+            enabled.checked = saved?.enabled ?? false;
+            enabled.setAttribute("aria-label", `${type.toUpperCase()} aktiviert`);
+
+            const settings = document.createElement("div");
+            settings.className = "configuration-protocol-settings";
+            settings.hidden = !enabled.checked;
+
+            const row = document.createElement("div");
+            row.className = "configuration-protocol";
+
+            row.append(field(`${type.toUpperCase()} aktiviert`, enabled));
+            protocols.append(row);
+
+            enabled.addEventListener("change", () => {
+                settings.hidden = !enabled.checked;
+            });
+
+            const ripNetworkControls: HTMLInputElement[] = [];
+
+            const dhcpPoolControls: {
+                name: HTMLInputElement;
+                interfaceName: HTMLSelectElement;
+                dnsServer: HTMLInputElement;
+                excludedAddresses: HTMLInputElement;
+            }[] = [];
+            let ripVersion: HTMLSelectElement | undefined;
+            let ripNoAutoSummary: HTMLInputElement | undefined;
+
+            const ospfNetworkControls: {
+                address: HTMLInputElement;
+                wildcardMask: HTMLInputElement;
+                area: HTMLInputElement;
+            }[] = [];
+
+            const staticRouteControls: {
+                destination: HTMLInputElement;
+                subnetMask: HTMLInputElement;
+                nextHop: HTMLInputElement;
+                outgoingInterface: HTMLSelectElement;
+                administrativeDistance: HTMLInputElement;
+            }[] = [];
+
+            const passiveInterfaceControls = new Map<string, HTMLInputElement>();
+
+
+            if (type === ProtocolType.Dhcp) {
+                const heading = document.createElement("h4");
+                heading.textContent = "DHCP-Einstellungen";
+                settings.append(heading);
+
+                const poolList = document.createElement("div");
+                poolList.className = "configuration-network-list";
+
+                const savedPools = saved?.dhcp?.pools ?? [];
+
+                const updatePoolHeadings = () => {
+                    poolList.querySelectorAll("h4").forEach((item, index) => {
+                        item.textContent = `DHCP-Pool ${index + 1}`;
+                    });
+                };
+
+                const addPool = (pool?: {
+                    name: string;
+                    interfaceName: string;
+                    dnsServer?: string;
+                    excludedAddresses?: string[];
+                }) => {
+                    const poolSection = document.createElement("section");
+                    poolSection.className = "configuration-dhcp-pool";
+
+                    const poolHeading = document.createElement("h4");
+                    poolHeading.textContent = `DHCP-Pool ${dhcpPoolControls.length + 1}`;
+
+                    const name = input("text", pool?.name ?? "", 64);
+                    name.placeholder = "z. B. LAN_POOL";
+
+                    const interfaceName = document.createElement("select");
+
+                    const placeholder = document.createElement("option");
+                    placeholder.value = "";
+                    placeholder.textContent = "Interface auswählen";
+                    placeholder.selected = !pool?.interfaceName;
+                    interfaceName.append(placeholder);
+
+                    device.interfaces.forEach((iface) => {
+                        const option = document.createElement("option");
+                        option.value = iface.name;
+                        option.textContent = iface.name;
+                        option.selected = iface.name === pool?.interfaceName;
+                        interfaceName.append(option);
+                    });
+
+                    const dnsServer = input("text", pool?.dnsServer ?? "", 15);
+                    dnsServer.placeholder = "z. B. 8.8.8.8";
+
+                    const excludedAddresses = input(
+                        "text",
+                        pool?.excludedAddresses?.join(", ") ?? "",
+                        512
+                    );
+                    excludedAddresses.placeholder = "z. B. 192.168.1.1, 192.168.1.10";
+
+                    const remove = button("Pool entfernen");
+                    remove.addEventListener("click", () => {
+                        const index = dhcpPoolControls.findIndex(
+                            (item) => item.name === name
+                        );
+
+                        if (index !== -1) {
+                            dhcpPoolControls.splice(index, 1);
+                        }
+
+                        poolSection.remove();
+                        updatePoolHeadings();
+                    });
+
+                    poolSection.append(
+                        poolHeading,
+                        field("Pool-Name", name),
+                        field("Router-Interface", interfaceName),
+                        field("DNS-Server (optional)", dnsServer),
+                        field("Ausgeschlossene IP-Adressen (kommagetrennt)", excludedAddresses),
+                        remove
+                    );
+
+                    poolList.append(poolSection);
+
+                    dhcpPoolControls.push({
+                        name,
+                        interfaceName,
+                        dnsServer,
+                        excludedAddresses
+                    });
+                };
+
+                const addButton = button("DHCP-Pool hinzufügen");
+                addButton.addEventListener("click", () => addPool());
+
+                if (savedPools.length > 0) {
+                    savedPools.forEach((pool) => addPool(pool));
+                } else {
+                    addPool();
+                }
+
+                settings.append(poolList, addButton);
+            }
+
+
+            if (type === ProtocolType.Rip) {
+                const ripSettings = document.createElement("details");
+                ripSettings.className = "configuration-advanced";
+
+                const ripSummary = document.createElement("summary");
+                ripSummary.textContent = "RIP-Einstellungen";
+                ripSettings.append(ripSummary);
+
+                ripVersion = document.createElement("select");
+
+                const version1 = document.createElement("option");
+                version1.value = "1";
+                version1.textContent = "Version 1";
+
+                const version2 = document.createElement("option");
+                version2.value = "2";
+                version2.textContent = "Version 2";
+
+                ripVersion.append(version1, version2);
+                ripVersion.value = String(saved?.rip?.version ?? 2);
+
+                ripNoAutoSummary = input("checkbox");
+                ripNoAutoSummary.checked = saved?.rip?.noAutoSummary ?? true;
+
+                ripSettings.append(
+                    field("RIP-Version", ripVersion),
+                    field("No Auto Summary", ripNoAutoSummary)
+                );
+
+                const networks = document.createElement("div");
+                networks.className = "configuration-network-list";
+
+                const networkRows = document.createElement("div");
+
+                const savedNetworks = saved?.rip?.networks ?? [];
+
+                const networkEntries = savedNetworks.length > 0
+                    ? savedNetworks.map((network) => ({ address: network.address }))
+                    : [{ address: "" }];
+
+                const saveRipNetworkValues = () => {
+                    ripNetworkControls.forEach((control, index) => {
+                        if (networkEntries[index]) {
+                            networkEntries[index].address = control.value;
+                        }
+                    });
+                };
+
+                const renderNetworks = () => {
+                    ripNetworkControls.length = 0;
+                    networkRows.replaceChildren();
+
+                    networkEntries.forEach((network, index) => {
+                        const address = input("text", network.address, 15);
+                        address.placeholder = "z. B. 192.168.10.0";
+
+                        ripNetworkControls.push(address);
+
+                        const networkGroup = document.createElement("div");
+                        networkGroup.className = "configuration-network-list";
+
+                        const heading = document.createElement("h4");
+                        heading.textContent = `Netzwerk ${index + 1}`;
+
+                        networkGroup.append(
+                            heading,
+                            this.validatedField(
+                                `protocol:${type}.rip.networks.${index}.address`,
+                                "Netzwerkadresse *",
+                                address
+                            )
+                        );
+
+                        if (index > 0) {
+                            const removeButton = button("Netzwerk entfernen");
+
+                            removeButton.addEventListener("click", () => {
+                                saveRipNetworkValues();
+                                networkEntries.splice(index, 1);
+                                renderNetworks();
+                            });
+
+                            networkGroup.append(removeButton);
+                        }
+
+                        networkRows.append(networkGroup);
+                    });
+                };
+
+                const addNetworkButton = button("Netzwerk hinzufügen");
+
+                addNetworkButton.addEventListener("click", () => {
+                    saveRipNetworkValues();
+                    networkEntries.push({ address: "" });
+                    renderNetworks();
+                });
+
+                networks.append(networkRows, addNetworkButton);
+                renderNetworks();
+
+                ripSettings.append(networks);
+                settings.append(ripSettings);
+            }
+
+
+            if (type === ProtocolType.Ospf) {
+                const ospfSettings = document.createElement("details");
+                ospfSettings.className = "configuration-advanced";
+
+                const ospfSummary = document.createElement("summary");
+                ospfSummary.textContent = "OSPF-Einstellungen";
+                ospfSettings.append(ospfSummary);
+
+                const process = saved?.ospf?.processes?.[0];
+
+                const processId = input("number", String(process?.processId ?? 1));
+                processId.min = "1";
+                processId.max = "65535";
+                processId.step = "1";
+                processId.addEventListener("input", () => {
+                    const value = Number(processId.value);
+                    if (processId.value !== "" && (!Number.isInteger(value) || value < 1 || value > 65535)) {
+                        processId.setCustomValidity("Process ID muss eine ganze Zahl zwischen 1 und 65535 sein.");
+                    } else {
+                        processId.setCustomValidity("");
+                    }
+                });
+                processId.min = "1";
+                processId.max = "65535";
+
+                const routerId = input("text", process?.routerId ?? "", 15);
+                routerId.placeholder = "Automatische Auswahl";
+
+                ospfSettings.append(
+                    this.validatedField(
+                        `protocol:${type}.ospf.processes.0.processId`,
+                        "Process ID (Standard: 1)",
+                        processId
+                    ),
+                    this.validatedField(
+                        `protocol:${type}.ospf.processes.0.routerId`,
+                        "Router ID (optional)",
+                        routerId
+                    )
+                );
+
+                const ospfNetworks = document.createElement("div");
+                ospfNetworks.className = "configuration-network-list";
+
+                const savedNetworks = process?.networks ?? [];
+
+                const networkEntries = savedNetworks.length > 0
+                    ? savedNetworks.map((network) => ({
+                        address: network.address,
+                        wildcardMask: network.wildcardMask,
+                        area: network.area
+                    }))
+                    : [{ address: "", wildcardMask: "", area: "0" }];
+
+                const networkRows = document.createElement("div");
+
+                const saveOspfNetworkValues = () => {
+                    ospfNetworkControls.forEach((control, index) => {
+                        networkEntries[index].address = control.address.value;
+                        networkEntries[index].wildcardMask = control.wildcardMask.value;
+                        networkEntries[index].area = control.area.value;
+                    });
+                };
+
+                const renderOspfNetworks = () => {
+                    ospfNetworkControls.length = 0;
+                    networkRows.replaceChildren();
+
+                    networkEntries.forEach((network, index) => {
+                        const address = input("text", network.address, 15);
+                        address.placeholder = "z. B. 192.168.10.0";
+
+                        const wildcardMask = input("text", network.wildcardMask, 15);
+                        wildcardMask.placeholder = "z. B. 0.0.0.255";
+
+                        const area = input("text", network.area, 10);
+                        area.placeholder = "0";
+
+                        ospfNetworkControls.push({ address, wildcardMask, area });
+
+                        const networkGroup = document.createElement("div");
+                        networkGroup.className = "configuration-network-list";
+
+                        const heading = document.createElement("h4");
+                        heading.textContent = `Netzwerk ${index + 1}`;
+
+                        const removeButton = button("Netzwerk entfernen");
+                        removeButton.disabled = networkEntries.length <= 1;
+
+                        removeButton.addEventListener("click", () => {
+                            saveOspfNetworkValues();
+                            networkEntries.splice(index, 1);
+                            renderOspfNetworks();
+                        });
+
+                        networkGroup.append(
+                            heading,
+                            this.validatedField(
+                                `protocol:${type}.ospf.processes.0.networks.${index}.address`,
+                                "Netzwerkadresse *",
+                                address
+                            ),
+                            this.validatedField(
+                                `protocol:${type}.ospf.processes.0.networks.${index}.wildcardMask`,
+                                "Wildcard-Maske *",
+                                wildcardMask
+                            ),
+                            this.validatedField(
+                                `protocol:${type}.ospf.processes.0.networks.${index}.area`,
+                                "Area *",
+                                area
+                            ),
+                            removeButton
+                        );
+
+                        networkRows.append(networkGroup);
+                    });
+                };
+
+                const addNetworkButton = button("Netzwerk hinzufügen");
+
+                addNetworkButton.addEventListener("click", () => {
+                    saveOspfNetworkValues();
+
+                    networkEntries.push({
+                        address: "",
+                        wildcardMask: "",
+                        area: "0"
+                    });
+
+                    renderOspfNetworks();
+                });
+
+                ospfNetworks.append(networkRows, addNetworkButton);
+                renderOspfNetworks();
+
+                ospfSettings.append(ospfNetworks);
+
+                const passiveDefault = input("checkbox");
+                passiveDefault.checked = process?.passiveInterfaceDefault ?? false;
+
+                ospfSettings.append(
+                    field("Passive Interface Default (Standard: deaktiviert)", passiveDefault)
+                );
+
+                const passiveInterfaces = document.createElement("div");
+                passiveInterfaces.className = "configuration-network-list";
+
+                const passiveInterfaceHeading = document.createElement("h4");
+                passiveInterfaceHeading.textContent = "Passive Interfaces";
+                passiveInterfaces.append(passiveInterfaceHeading);
+
+                const passiveInterfaceValues = new Map<string, boolean>(
+                    Object.entries(process?.passiveInterfaces ?? {})
+                );
+
+                const renderPassiveInterfaces = () => {
+                    passiveInterfaceControls.forEach((checkbox, name) => {
+                        passiveInterfaceValues.set(name, checkbox.checked);
+                    });
+
+                    passiveInterfaceControls.clear();
+                    passiveInterfaces.replaceChildren(passiveInterfaceHeading);
+
+                    controls
+                        .filter(({ enabled }) => enabled.checked)
+                        .forEach(({ id }) => {
+                            const iface = device.interfaces.find((item) => item.id === id);
+                            if (!iface) {
+                                return;
+                            }
+
+                            const checkbox = input("checkbox");
+                            checkbox.checked = passiveInterfaceValues.get(iface.name) ?? false;
+
+                            checkbox.setAttribute(
+                                "aria-label",
+                                `${iface.name}: Passive Interface`
+                            );
+
+                            passiveInterfaceControls.set(iface.name, checkbox);
+                            passiveInterfaces.append(field(iface.name, checkbox));
+                        });
+                };
+
+                controls.forEach(({ enabled }) => {
+                    enabled.addEventListener("change", renderPassiveInterfaces);
+                });
+
+                renderPassiveInterfaces();
+
+                ospfSettings.append(passiveInterfaces);
+                settings.append(ospfSettings);
+            }
+
+            if (type === ProtocolType.StaticRoute) {
+                const heading = document.createElement("h4");
+                heading.textContent = "Statische Routen";
+                settings.append(heading);
+
+                const routeList = document.createElement("div");
+                routeList.className = "configuration-network-list";
+
+                const savedRoutes = saved?.staticRoutes?.routes ?? [];
+
+                const updateRouteHeadings = () => {
+                    routeList.querySelectorAll("h4").forEach((item, index) => {
+                        item.textContent = `Statische Route ${index + 1}`;
+                    });
+                };
+
+                const addRoute = (route?: {
+                    destination: string;
+                    subnetMask: string;
+                    nextHop?: string;
+                    outgoingInterface?: string;
+                    administrativeDistance?: number;
+                }) => {
+                    const routeSection = document.createElement("section");
+                    routeSection.className = "configuration-static-route";
+
+                    const routeHeading = document.createElement("h4");
+                    routeHeading.textContent = `Statische Route ${staticRouteControls.length + 1}`;
+
+                    const destination = input("text", route?.destination ?? "", 15);
+                    destination.placeholder = "z. B. 192.168.2.0";
+
+                    const subnetMask = input("text", route?.subnetMask ?? "", 15);
+                    subnetMask.placeholder = "z. B. 255.255.255.0";
+
+                    const nextHop = input("text", route?.nextHop ?? "", 15);
+                    nextHop.placeholder = "z. B. 192.168.1.2";
+
+                    const outgoingInterface = document.createElement("select");
+
+                    nextHop.addEventListener("input", () => {
+                        if (nextHop.value.trim() !== "") {
+                            outgoingInterface.value = "";
+                        }
+                    });
+
+                    outgoingInterface.addEventListener("change", () => {
+                        if (outgoingInterface.value !== "") {
+                            nextHop.value = "";
+                        }
+                    });
+
+                    const placeholder = document.createElement("option");
+                    placeholder.value = "";
+                    placeholder.textContent = "Kein Interface ausgewählt";
+                    outgoingInterface.append(placeholder);
+
+                    device.interfaces.forEach((iface) => {
+                        const option = document.createElement("option");
+                        option.value = iface.name;
+                        option.textContent = iface.name;
+                        option.selected = iface.name === route?.outgoingInterface;
+                        outgoingInterface.append(option);
+                    });
+
+                    const administrativeDistance = input(
+                        "number",
+                        String(route?.administrativeDistance ?? 1)
+                    );
+                    administrativeDistance.min = "1";
+                    administrativeDistance.max = "255";
+                    administrativeDistance.placeholder = "1";
+
+                    const remove = button("Route entfernen");
+
+                    remove.addEventListener("click", () => {
+                        const index = staticRouteControls.findIndex(
+                            (item) => item.destination === destination
+                        );
+
+                        if (index !== -1) {
+                            staticRouteControls.splice(index, 1);
+                        }
+
+                        routeSection.remove();
+                        updateRouteHeadings();
+                    });
+
+                    routeSection.append(
+                        routeHeading,
+                        field("Zielnetzwerk", destination),
+                        field("Subnetzmaske", subnetMask),
+                        field("Next Hop (optional)", nextHop),
+                        field("Ausgangsinterface (optional)", outgoingInterface),
+                        field("Administrative Distanz", administrativeDistance),
+                        remove
+                    );
+
+                    routeList.append(routeSection);
+
+                    staticRouteControls.push({
+                        destination,
+                        subnetMask,
+                        nextHop,
+                        outgoingInterface,
+                        administrativeDistance
+                    });
+                };
+
+                if (savedRoutes.length > 0) {
+                    savedRoutes.forEach((route) => addRoute(route));
+                } else {
+                    addRoute();
+                }
+
+                const addButton = button("Statische Route hinzufügen");
+                addButton.addEventListener("click", () => addRoute());
+
+                settings.append(routeList, addButton);
+            }
+
+            protocols.append(settings);
+
+            return {
+                type,
+                enabled,
+                settings,
+                ripVersion,
+                ripNoAutoSummary,
+                ripNetworkControls,
+                dhcpPoolControls,
+                ospfNetworkControls,
+                staticRouteControls,
+                passiveInterfaceControls,
+                processId: type === ProtocolType.Ospf
+                    ? settings.querySelector<HTMLInputElement>('input[type="number"]')
+                    : undefined,
+                routerId: type === ProtocolType.Ospf
+                    ? settings.querySelector<HTMLInputElement>('input[type="text"]')
+                    : undefined,
+                passiveDefault: type === ProtocolType.Ospf
+                    ? settings.querySelector<HTMLInputElement>('input[type="checkbox"]')
+                    : undefined,
+                savedProcesses
+            };
+        });
+
+        if (!deviceProtocols.length) {
+            protocols.append(document.createTextNode("Keine Protokolle für diesen Gerätetyp."));
+        }
+
         content.append(protocols);
         form.append(content);
+
 
         const actions = document.createElement("footer"); actions.className = "configuration-actions";
         const cancel = button("Abbrechen"); cancel.className = "configuration-secondary";
@@ -411,10 +1022,93 @@ export class DeviceConfigurationForm {
                             ? Number(switchport.vlan.value) : undefined
                     } : {})
                 })),
-                protocols: protocolControls.filter((item) => item.selected.checked).map(({ type, read }) => {
+                protocols: [...routingControls.map(({
+                    type,
+                    enabled,
+                    ripNetworkControls,
+                    dhcpPoolControls,
+                    ripVersion,
+                    ripNoAutoSummary,
+                    ospfNetworkControls,
+                    passiveInterfaceControls,
+                    processId,
+                    routerId,
+                    staticRouteControls,
+                    passiveDefault
+                }) => ({
+                    type,
+                    enabled: enabled.checked,
+
+                    ...(type === ProtocolType.Rip
+                        ? {
+                            rip: {
+                                version: Number(ripVersion?.value ?? 2) as 1 | 2,
+                                noAutoSummary: ripNoAutoSummary?.checked ?? true,
+                                networks: ripNetworkControls.map((address) => ({
+                                    address: address.value.trim()
+                                }))
+                            }
+                        }
+                        : {}),
+
+                    ...(type === ProtocolType.Ospf
+                        ? {
+                            ospf: {
+                                processes: [{
+                                    processId: Number(processId?.value ?? 1),
+                                    routerId: routerId?.value.trim() || undefined,
+                                    networks: ospfNetworkControls.map((network) => ({
+                                        address: network.address.value.trim(),
+                                        wildcardMask: network.wildcardMask.value.trim(),
+                                        area: network.area.value.trim()
+                                    })),
+                                    passiveInterfaceDefault: passiveDefault?.checked ?? false,
+                                    passiveInterfaces: Object.fromEntries(
+                                        Array.from(passiveInterfaceControls, ([name, checkbox]) => [
+                                            name,
+                                            checkbox.checked
+                                        ])
+                                    )
+                                }]
+                            }
+                        }
+                        : {}),
+                    ...(type === ProtocolType.Dhcp
+                        ? {
+                            dhcp: {
+                                pools: dhcpPoolControls.map((pool) => ({
+                                    name: pool.name.value.trim(),
+                                    interfaceName: pool.interfaceName.value,
+                                    dnsServer: pool.dnsServer.value.trim() || undefined,
+                                    excludedAddresses: pool.excludedAddresses.value
+                                        .split(",")
+                                        .map((address) => address.trim())
+                                        .filter(Boolean)
+                                }))
+                            }
+                        }
+                        : {}),
+                    ...(type === ProtocolType.StaticRoute
+                        ? {
+                            staticRoutes: {
+                                routes: staticRouteControls.map((route) => ({
+                                    destination: route.destination.value.trim(),
+                                    subnetMask: route.subnetMask.value.trim(),
+                                    nextHop: route.nextHop.value.trim() || undefined,
+                                    outgoingInterface: route.outgoingInterface.value || undefined,
+                                    
+                                    administrativeDistance: Number(
+                                        route.administrativeDistance.value || 1
+                                    )
+                                }))
+                            }
+                        }
+                        : {})
+                })),
+                ...protocolControls.filter((item) => item.selected.checked).map(({ type, read }) => {
                     const settings = read();
                     return { type, enabled: isProtocolComplete(type, settings), ...(settings ? { settings } : {}) };
-                })
+                })]
             };
             this.protocolTypes = configuration.protocols.map((item) => item.type);
             const errors = validateDeviceConfiguration(device, configuration, otherHostnames);
@@ -557,6 +1251,12 @@ function input(type: string, value = "", maxLength?: number): HTMLInputElement {
     element.autocomplete = type === "password" ? "new-password" : "off";
     if (maxLength !== undefined) { element.maxLength = maxLength; }
     return element;
+
+    function numberInput(value: number): HTMLInputElement {
+        const element = input("number", String(value));
+        element.min = "1";
+        return element;
+    }
 }
 function button(text: string): HTMLButtonElement {
     const result = document.createElement("button"); result.type = "button"; result.textContent = text;

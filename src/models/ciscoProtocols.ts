@@ -28,6 +28,20 @@ export class StaticRouteProtocol extends NetworkProtocol {
   }
 }
 
+export interface DhcpPoolConfiguration {
+  name: string;
+  interfaceName: string;
+  dnsServer?: string;
+  excludedAddresses?: string[];
+}
+
+export class DhcpProtocol extends NetworkProtocol {
+  public readonly pools: DhcpPoolConfiguration[] = [];
+  public constructor(id: string) {
+    super({ id, type: ProtocolType.Dhcp });
+  }
+}
+
 export interface OspfNetworkConfiguration {
   address: string;
   wildcardMask: string;
@@ -51,6 +65,20 @@ export class OspfProtocol extends NetworkProtocol {
   }
 }
 
+export interface RipNetworkConfiguration {
+  address: string;
+}
+
+export class RipProtocol extends NetworkProtocol {
+    public readonly networks: RipNetworkConfiguration[] = [];
+    public version: 1 | 2 = 2;
+    public noAutoSummary = true;
+
+    public constructor(id: string) {
+        super({ id, type: ProtocolType.Rip });
+    }
+}
+
 export interface SwitchportConfiguration {
   mode?: "access" | "trunk";
   accessVlan?: number;
@@ -58,3 +86,4 @@ export interface SwitchportConfiguration {
   /** Undefined means IOS default (all VLANs); [] means none. */
   allowedVlans?: number[];
 }
+

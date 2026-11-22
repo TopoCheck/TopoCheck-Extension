@@ -946,9 +946,146 @@ kbd {
     padding: 4px 0 12px 24px;
 }
 
+.configuration-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    padding: 10px 12px;
+    border-top: 1px solid var(--vscode-panel-border, #dedfe8);
+    background: var(--vscode-editor-background);
+    flex-shrink: 0;
+}
+
+.device-configuration .configuration-secondary {
+    background: var(--vscode-button-secondaryBackground);
+    color: var(--vscode-button-secondaryForeground);
+}
+
+.device-configuration button:disabled {
+    opacity: .6;
+    cursor: wait;
+}
+
+.configuration-error,
+.configuration-field-error {
+    color: var(--vscode-errorForeground);
+    white-space: pre-line;
+    font-size: 10px;
+    line-height: 1.5;
+}
+
+.configuration-field-error {
+    margin: 5px 0 0;
+}
+
+.device-configuration [aria-invalid="true"] {
+    border-color: var(--vscode-inputValidation-errorBorder, var(--vscode-errorForeground)) !important;
+}
+
+.configuration-switch-notice {
+    margin-bottom: 12px;
+    padding: 10px;
+    background: var(--vscode-inputValidation-warningBackground, var(--vscode-editor-background));
+    border: 1px solid var(--vscode-inputValidation-warningBorder, #bd9b35);
+    border-radius: 5px;
+    font-size: 11px;
+}
+
+.configuration-switch-notice button {
+    margin: 4px 4px 0 0;
+    padding: 5px 7px;
+}
+
+@media (max-width: 640px) {
+    .configuration-open .device-configuration {
+        position: absolute;
+        right: 0;
+        top: 0;
+        width: min(var(--configuration-width, 320px), calc(100vw - 40px));
+        z-index: 20;
+        box-shadow: -8px 0 24px rgb(0 0 0 / 15%);
+    }
+
+    .configuration-open .workspace {
+        position: relative;
+    }
+}
+
+/* Topologie bestätigen – kompaktes Türkis */
+
+.confirm-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+
+    width: auto;
+    min-width: 0;
+    padding: 6px 12px;
+
+    border: 1px solid #13838c;
+    border-radius: 6px;
+
+    background: #13838c;
+    color: #ffffff;
+
+    font-family: inherit;
+    font-size: 11px;
+    font-weight: 600;
+
+    white-space: nowrap;
+    cursor: pointer;
+    touch-action: manipulation;
+
+    box-shadow: 0 2px 5px rgba(19, 131, 140, 0.25);
+    transition: all 0.2s ease;
+}
+
+.confirm-button:hover {
+    background: #1699a2;
+    border-color: #1699a2;
+    box-shadow: 0 3px 8px rgba(19, 131, 140, 0.35);
+}
+
+.confirm-button:active {
+    transform: translateY(1px);
+    box-shadow: none;
+}
+
+.confirm-button:focus-visible {
+    outline: 2px solid var(--vscode-focusBorder);
+    outline-offset: 2px;
+}
+
+/* Einklappbare erweiterte Protokolleinstellungen */
+
+.configuration-advanced {
+    margin-top: 14px;
+    padding: 10px;
+    border: 1px solid var(--vscode-panel-border);
+    border-radius: 6px;
+    background: var(--vscode-editor-background);
+}
+
+.configuration-advanced summary {
+    cursor: pointer;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--vscode-foreground);
+}
+
+.configuration-advanced summary:hover {
+    color: var(--vscode-focusBorder);
+}
+
+.configuration-advanced[open] summary {
+    margin-bottom: 12px;
+}
+
 .device-configuration select {
     box-sizing: border-box;
     width: 100%;
+    min-width: 0;
+    line-height: 1.4;
     padding: 6px 8px;
     font: inherit;
     font-size: 11px;
@@ -1079,69 +1216,4 @@ kbd {
     font-size: 11px;
     opacity: .8;
     white-space: normal;
-}
-
-.configuration-actions {
-    display: flex;
-    justify-content: flex-end;
-    gap: 8px;
-    padding: 10px 12px;
-    border-top: 1px solid var(--vscode-panel-border, #dedfe8);
-    background: var(--vscode-editor-background);
-    flex-shrink: 0;
-}
-
-.device-configuration .configuration-secondary {
-    background: var(--vscode-button-secondaryBackground);
-    color: var(--vscode-button-secondaryForeground);
-}
-
-.device-configuration button:disabled {
-    opacity: .6;
-    cursor: wait;
-}
-
-.configuration-error,
-.configuration-field-error {
-    color: var(--vscode-errorForeground);
-    white-space: pre-line;
-    font-size: 10px;
-    line-height: 1.5;
-}
-
-.configuration-field-error {
-    margin: 5px 0 0;
-}
-
-.device-configuration [aria-invalid="true"] {
-    border-color: var(--vscode-inputValidation-errorBorder, var(--vscode-errorForeground)) !important;
-}
-
-.configuration-switch-notice {
-    margin-bottom: 12px;
-    padding: 10px;
-    background: var(--vscode-inputValidation-warningBackground, var(--vscode-editor-background));
-    border: 1px solid var(--vscode-inputValidation-warningBorder, #bd9b35);
-    border-radius: 5px;
-    font-size: 11px;
-}
-
-.configuration-switch-notice button {
-    margin: 4px 4px 0 0;
-    padding: 5px 7px;
-}
-
-@media (max-width: 640px) {
-    .configuration-open .device-configuration {
-        position: absolute;
-        right: 0;
-        top: 0;
-        width: min(var(--configuration-width, 320px), calc(100vw - 40px));
-        z-index: 20;
-        box-shadow: -8px 0 24px rgb(0 0 0 / 15%);
-    }
-
-    .configuration-open .workspace {
-        position: relative;
-    }
 }
