@@ -311,6 +311,12 @@ export class DeviceConfigurationForm {
 
             const ripNetworkControls: HTMLInputElement[] = [];
 
+            const dhcpPoolControls: {
+                name: HTMLInputElement;
+                interfaceName: HTMLSelectElement;
+                dnsServer: HTMLInputElement;
+                excludedAddresses: HTMLInputElement;
+            }[] = [];
             let ripVersion: HTMLSelectElement | undefined;
             let ripNoAutoSummary: HTMLInputElement | undefined;
 
@@ -320,7 +326,118 @@ export class DeviceConfigurationForm {
                 area: HTMLInputElement;
             }[] = [];
 
+            const staticRouteControls: {
+                destination: HTMLInputElement;
+                subnetMask: HTMLInputElement;
+                nextHop: HTMLInputElement;
+                outgoingInterface: HTMLSelectElement;
+                administrativeDistance: HTMLInputElement;
+            }[] = [];
+
             const passiveInterfaceControls = new Map<string, HTMLInputElement>();
+
+
+            if (type === ProtocolType.Dhcp) {
+                const heading = document.createElement("h4");
+                heading.textContent = "DHCP-Einstellungen";
+                settings.append(heading);
+
+                const poolList = document.createElement("div");
+                poolList.className = "configuration-network-list";
+
+                const savedPools = saved?.dhcp?.pools ?? [];
+
+                const updatePoolHeadings = () => {
+                    poolList.querySelectorAll("h4").forEach((item, index) => {
+                        item.textContent = `DHCP-Pool ${index + 1}`;
+                    });
+                };
+
+                const addPool = (pool?: {
+                    name: string;
+                    interfaceName: string;
+                    dnsServer?: string;
+                    excludedAddresses?: string[];
+                }) => {
+                    const poolSection = document.createElement("section");
+                    poolSection.className = "configuration-dhcp-pool";
+
+                    const poolHeading = document.createElement("h4");
+                    poolHeading.textContent = `DHCP-Pool ${dhcpPoolControls.length + 1}`;
+
+                    const name = input("text", pool?.name ?? "", 64);
+                    name.placeholder = "z. B. LAN_POOL";
+
+                    const interfaceName = document.createElement("select");
+
+                    const placeholder = document.createElement("option");
+                    placeholder.value = "";
+                    placeholder.textContent = "Interface auswählen";
+                    placeholder.selected = !pool?.interfaceName;
+                    interfaceName.append(placeholder);
+
+                    device.interfaces.forEach((iface) => {
+                        const option = document.createElement("option");
+                        option.value = iface.name;
+                        option.textContent = iface.name;
+                        option.selected = iface.name === pool?.interfaceName;
+                        interfaceName.append(option);
+                    });
+
+                    const dnsServer = input("text", pool?.dnsServer ?? "", 15);
+                    dnsServer.placeholder = "z. B. 8.8.8.8";
+
+                    const excludedAddresses = input(
+                        "text",
+                        pool?.excludedAddresses?.join(", ") ?? "",
+                        512
+                    );
+                    excludedAddresses.placeholder = "z. B. 192.168.1.1, 192.168.1.10";
+
+                    const remove = button("Pool entfernen");
+                    remove.addEventListener("click", () => {
+                        const index = dhcpPoolControls.findIndex(
+                            (item) => item.name === name
+                        );
+
+                        if (index !== -1) {
+                            dhcpPoolControls.splice(index, 1);
+                        }
+
+                        poolSection.remove();
+                        updatePoolHeadings();
+                    });
+
+                    poolSection.append(
+                        poolHeading,
+                        field("Pool-Name", name),
+                        field("Router-Interface", interfaceName),
+                        field("DNS-Server (optional)", dnsServer),
+                        field("Ausgeschlossene IP-Adressen (kommagetrennt)", excludedAddresses),
+                        remove
+                    );
+
+                    poolList.append(poolSection);
+
+                    dhcpPoolControls.push({
+                        name,
+                        interfaceName,
+                        dnsServer,
+                        excludedAddresses
+                    });
+                };
+
+                const addButton = button("DHCP-Pool hinzufügen");
+                addButton.addEventListener("click", () => addPool());
+
+                if (savedPools.length > 0) {
+                    savedPools.forEach((pool) => addPool(pool));
+                } else {
+                    addPool();
+                }
+
+                settings.append(poolList, addButton);
+            }
 
 
             if (type === ProtocolType.Rip) {
@@ -623,6 +740,127 @@ export class DeviceConfigurationForm {
                 settings.append(ospfSettings);
             }
 
+            if (type === ProtocolType.StaticRoute) {
+                const heading = document.createElement("h4");
+                heading.textContent = "Statische Routen";
+                settings.append(heading);
+
+                const routeList = document.createElement("div");
+                routeList.className = "configuration-network-list";
+
+                const savedRoutes = saved?.staticRoutes?.routes ?? [];
+
+                const updateRouteHeadings = () => {
+                    routeList.querySelectorAll("h4").forEach((item, index) => {
+                        item.textContent = `Statische Route ${index + 1}`;
+                    });
+                };
+
+                const addRoute = (route?: {
+                    destination: string;
+                    subnetMask: string;
+                    nextHop?: string;
+                    outgoingInterface?: string;
+                    administrativeDistance?: number;
+                }) => {
+                    const routeSection = document.createElement("section");
+                    routeSection.className = "configuration-static-route";
+
+                    const routeHeading = document.createElement("h4");
+                    routeHeading.textContent = `Statische Route ${staticRouteControls.length + 1}`;
+
+                    const destination = input("text", route?.destination ?? "", 15);
+                    destination.placeholder = "z. B. 192.168.2.0";
+
+                    const subnetMask = input("text", route?.subnetMask ?? "", 15);
+                    subnetMask.placeholder = "z. B. 255.255.255.0";
+
+                    const nextHop = input("text", route?.nextHop ?? "", 15);
+                    nextHop.placeholder = "z. B. 192.168.1.2";
+
+                    const outgoingInterface = document.createElement("select");
+
+                    nextHop.addEventListener("input", () => {
+                        if (nextHop.value.trim() !== "") {
+                            outgoingInterface.value = "";
+                        }
+                    });
+
+                    outgoingInterface.addEventListener("change", () => {
+                        if (outgoingInterface.value !== "") {
+                            nextHop.value = "";
+                        }
+                    });
+
+                    const placeholder = document.createElement("option");
+                    placeholder.value = "";
+                    placeholder.textContent = "Kein Interface ausgewählt";
+                    outgoingInterface.append(placeholder);
+
+                    device.interfaces.forEach((iface) => {
+                        const option = document.createElement("option");
+                        option.value = iface.name;
+                        option.textContent = iface.name;
+                        option.selected = iface.name === route?.outgoingInterface;
+                        outgoingInterface.append(option);
+                    });
+
+                    const administrativeDistance = input(
+                        "number",
+                        String(route?.administrativeDistance ?? 1)
+                    );
+                    administrativeDistance.min = "1";
+                    administrativeDistance.max = "255";
+                    administrativeDistance.placeholder = "1";
+
+                    const remove = button("Route entfernen");
+
+                    remove.addEventListener("click", () => {
+                        const index = staticRouteControls.findIndex(
+                            (item) => item.destination === destination
+                        );
+
+                        if (index !== -1) {
+                            staticRouteControls.splice(index, 1);
+                        }
+
+                        routeSection.remove();
+                        updateRouteHeadings();
+                    });
+
+                    routeSection.append(
+                        routeHeading,
+                        field("Zielnetzwerk", destination),
+                        field("Subnetzmaske", subnetMask),
+                        field("Next Hop (optional)", nextHop),
+                        field("Ausgangsinterface (optional)", outgoingInterface),
+                        field("Administrative Distanz", administrativeDistance),
+                        remove
+                    );
+
+                    routeList.append(routeSection);
+
+                    staticRouteControls.push({
+                        destination,
+                        subnetMask,
+                        nextHop,
+                        outgoingInterface,
+                        administrativeDistance
+                    });
+                };
+
+                if (savedRoutes.length > 0) {
+                    savedRoutes.forEach((route) => addRoute(route));
+                } else {
+                    addRoute();
+                }
+
+                const addButton = button("Statische Route hinzufügen");
+                addButton.addEventListener("click", () => addRoute());
+
+                settings.append(routeList, addButton);
+            }
+
             protocols.append(settings);
 
             return {
@@ -632,7 +870,9 @@ export class DeviceConfigurationForm {
                 ripVersion,
                 ripNoAutoSummary,
                 ripNetworkControls,
+                dhcpPoolControls,
                 ospfNetworkControls,
+                staticRouteControls,
                 passiveInterfaceControls,
                 processId: type === ProtocolType.Ospf
                     ? settings.querySelector<HTMLInputElement>('input[type="number"]')
@@ -675,12 +915,14 @@ export class DeviceConfigurationForm {
                     type,
                     enabled,
                     ripNetworkControls,
+                    dhcpPoolControls,
                     ripVersion,
                     ripNoAutoSummary,
                     ospfNetworkControls,
                     passiveInterfaceControls,
                     processId,
                     routerId,
+                    staticRouteControls,
                     passiveDefault
                 }) => ({
                     type,
@@ -717,6 +959,37 @@ export class DeviceConfigurationForm {
                                         ])
                                     )
                                 }]
+                            }
+                        }
+                        : {}),
+                    ...(type === ProtocolType.Dhcp
+                        ? {
+                            dhcp: {
+                                pools: dhcpPoolControls.map((pool) => ({
+                                    name: pool.name.value.trim(),
+                                    interfaceName: pool.interfaceName.value,
+                                    dnsServer: pool.dnsServer.value.trim() || undefined,
+                                    excludedAddresses: pool.excludedAddresses.value
+                                        .split(",")
+                                        .map((address) => address.trim())
+                                        .filter(Boolean)
+                                }))
+                            }
+                        }
+                        : {}),
+                    ...(type === ProtocolType.StaticRoute
+                        ? {
+                            staticRoutes: {
+                                routes: staticRouteControls.map((route) => ({
+                                    destination: route.destination.value.trim(),
+                                    subnetMask: route.subnetMask.value.trim(),
+                                    nextHop: route.nextHop.value.trim() || undefined,
+                                    outgoingInterface: route.outgoingInterface.value || undefined,
+                                    
+                                    administrativeDistance: Number(
+                                        route.administrativeDistance.value || 1
+                                    )
+                                }))
                             }
                         }
                         : {})

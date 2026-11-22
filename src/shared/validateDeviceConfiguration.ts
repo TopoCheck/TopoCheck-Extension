@@ -338,6 +338,91 @@ function validateProtocols(
         } else if (protocol.type === ProtocolType.Ospf) {
             validateOspf(protocol, field, report);
         }
+
+        // Statische Routen prüfen
+        if (protocol.type === ProtocolType.StaticRoute && protocol.enabled) {
+            const routes = protocol.staticRoutes?.routes ?? [];
+
+            if (routes.length === 0) {
+                add(
+                    `${field}.staticRoutes.routes`,
+                    "static-route-required",
+                    "Für statische Routen muss mindestens eine Route vorhanden sein."
+                );
+            }
+
+            routes.forEach((route, routeIndex) => {
+                const routeField = `${field}.staticRoutes.routes.${routeIndex}`;
+
+                if (!isValidIpv4Address(route.destination)) {
+                    add(
+                        `${routeField}.destination`,
+                        "static-route-destination-invalid",
+                        "Bitte eine gültige IPv4-Zieladresse angeben."
+                    );
+                }
+
+                if (!isValidSubnetMask(route.subnetMask)) {
+                    add(
+                        `${routeField}.subnetMask`,
+                        "static-route-mask-invalid",
+                        "Bitte eine gültige Subnetzmaske angeben."
+                    );
+                }
+
+                if (
+                    route.nextHop !== undefined &&
+                    route.nextHop.trim() !== "" &&
+                    !isValidIpv4Address(route.nextHop)
+                ) {
+                    add(
+                        `${routeField}.nextHop`,
+                        "static-route-next-hop-invalid",
+                        "Bitte eine gültige IPv4-Adresse für den Next Hop angeben."
+                    );
+                }
+
+                if (
+                    route.outgoingInterface !== undefined &&
+                    route.outgoingInterface.trim() !== "" &&
+                    !device.interfaces.some(
+                        (iface) => iface.name === route.outgoingInterface
+                    )
+                ) {
+                    add(
+                        `${routeField}.outgoingInterface`,
+                        "static-route-interface-invalid",
+                        "Das ausgewählte Ausgangsinterface gehört nicht zu diesem Gerät."
+                    );
+                }
+
+                if (
+                    (!route.nextHop || route.nextHop.trim() === "") &&
+                    (!route.outgoingInterface || route.outgoingInterface.trim() === "")
+                ) {
+                    add(
+                        `${routeField}.nextHop`,
+                        "static-route-target-required",
+                        "Bitte entweder einen Next Hop oder ein Ausgangsinterface angeben."
+                    );
+                }
+
+                if (
+                    route.administrativeDistance !== undefined &&
+                    (
+                        !Number.isInteger(route.administrativeDistance) ||
+                        route.administrativeDistance < 1 ||
+                        route.administrativeDistance > 255
+                    )
+                ) {
+                    add(
+                        `${routeField}.administrativeDistance`,
+                        "static-route-distance-invalid",
+                        "Die Administrative Distanz muss eine ganze Zahl zwischen 1 und 255 sein."
+                    );
+                }
+            });
+        }
     });
 }
 

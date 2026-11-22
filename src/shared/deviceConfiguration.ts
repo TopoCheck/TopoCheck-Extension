@@ -7,7 +7,7 @@ import { ProtocolType } from "../models/protocolType";
 import type { Device } from "../modules/topology/models";
 import { DeviceConfigurationValidationError, validateDeviceConfiguration } from "./validateDeviceConfiguration";
 import type { DeviceAccessConfiguration } from "../models/deviceAccessConfiguration";
-import { RipProtocol, OspfProtocol } from "../models/ciscoProtocols";
+import { RipProtocol, OspfProtocol, StaticRouteProtocol, DhcpProtocol } from "../models/ciscoProtocols";
 
 export interface DeviceConfiguration extends DeviceAccessConfiguration {
     label?: string;
@@ -39,6 +39,23 @@ export interface DeviceConfiguration extends DeviceAccessConfiguration {
                 }[];
                 passiveInterfaceDefault: boolean;
                 passiveInterfaces: Record<string, boolean>;
+            }[];
+        };
+        dhcp?: {
+            pools: {
+                name: string;
+                interfaceName: string;
+                dnsServer?: string;
+                excludedAddresses?: string[];
+            }[];
+        };
+        staticRoutes?: {
+            routes: {
+                destination: string;
+                subnetMask: string;
+                nextHop?: string;
+                outgoingInterface?: string;
+                administrativeDistance?: number;
             }[];
         };
     }[];
@@ -105,6 +122,73 @@ function isOspfConfiguration(value: unknown): boolean {
         });
 }
 
+function isDhcpConfiguration(value: unknown): boolean {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+        return false;
+    }
+
+    const config = value as Record<string, unknown>;
+
+    return Array.isArray(config.pools) &&
+        config.pools.length <= 1024 &&
+        config.pools.every((pool: unknown) => {
+            if (!pool || typeof pool !== "object") {
+                return false;
+            }
+
+            const item = pool as Record<string, unknown>;
+
+            return typeof item.name === "string" &&
+                item.name.length <= 128 &&
+                typeof item.interfaceName === "string" &&
+                item.interfaceName.length <= 128 &&
+                (item.dnsServer === undefined ||
+                    (typeof item.dnsServer === "string" &&
+                        item.dnsServer.length <= 32)) &&
+                (item.excludedAddresses === undefined ||
+                    (Array.isArray(item.excludedAddresses) &&
+                        item.excludedAddresses.length <= 1024 &&
+                        item.excludedAddresses.every(
+                            (address) =>
+                                typeof address === "string" &&
+                                address.length <= 32
+                        )));
+        });
+}
+
+function isStaticRoutesConfiguration(value: unknown): boolean {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+        return false;
+    }
+
+    const config = value as Record<string, unknown>;
+
+    return Array.isArray(config.routes) &&
+        config.routes.length <= 1024 &&
+        config.routes.every((route: unknown) => {
+            if (!route || typeof route !== "object") {
+                return false;
+            }
+
+            const item = route as Record<string, unknown>;
+
+            return typeof item.destination === "string" &&
+                item.destination.length <= 32 &&
+                typeof item.subnetMask === "string" &&
+                item.subnetMask.length <= 32 &&
+                (item.nextHop === undefined ||
+                    (typeof item.nextHop === "string" &&
+                        item.nextHop.length <= 32)) &&
+                (item.outgoingInterface === undefined ||
+                    (typeof item.outgoingInterface === "string" &&
+                        item.outgoingInterface.length <= 128)) &&
+                (item.administrativeDistance === undefined ||
+                    (Number.isInteger(item.administrativeDistance) &&
+                        (item.administrativeDistance as number) >= 1 &&
+                        (item.administrativeDistance as number) <= 255));
+        });
+}
+
 /** Runtime validation at the Webview boundary; semantic checks follow before saving. */
 export function isDeviceConfiguration(value: unknown): value is DeviceConfiguration {
     if (!value || typeof value !== "object") { return false; }
@@ -130,12 +214,24 @@ export function isDeviceConfiguration(value: unknown): value is DeviceConfigurat
                 typeof protocol.enabled === "boolean" &&
                 (protocol.rip === undefined || isRipConfiguration(protocol.rip)) &&
                 (protocol.ospf === undefined || isOspfConfiguration(protocol.ospf)) &&
+                (protocol.dhcp === undefined || isDhcpConfiguration(protocol.dhcp)) &&
+                (protocol.staticRoutes === undefined || isStaticRoutesConfiguration(protocol.staticRoutes)) &&
                 (protocol.type === ProtocolType.Rip
                     ? protocol.ospf === undefined
                     : protocol.rip === undefined) &&
                 (protocol.type === ProtocolType.Ospf
                     ? protocol.rip === undefined
-                    : protocol.ospf === undefined);
+                    : protocol.ospf === undefined) &&
+                (protocol.type === ProtocolType.Dhcp
+                    ? protocol.rip === undefined &&
+                      protocol.ospf === undefined &&
+                      protocol.staticRoutes === undefined
+                    : protocol.dhcp === undefined) &&
+                (protocol.type === ProtocolType.StaticRoute
+                    ? protocol.rip === undefined &&
+                      protocol.ospf === undefined &&
+                      protocol.dhcp === undefined
+                    : protocol.staticRoutes === undefined);
         });
 }
 
@@ -179,6 +275,31 @@ export function configurationOf(device: Device, connectedInterfaceIds: readonly 
                         })),
                         passiveInterfaceDefault: process.passiveInterfaceDefault,
                         passiveInterfaces: { ...process.passiveInterfaces }
+                    }))
+                };
+            }
+
+            if (protocol.dhcp !== undefined) {
+                result.dhcp = {
+                    pools: protocol.dhcp.map((pool) => ({
+                        name: pool.name,
+                        interfaceName: pool.interfaceName,
+                        dnsServer: pool.dnsServer,
+                        excludedAddresses: pool.excludedAddresses
+                            ? [...pool.excludedAddresses]
+                            : undefined
+                    }))
+                };
+            }
+
+            if (protocol.staticRoutes !== undefined) {
+                result.staticRoutes = {
+                    routes: protocol.staticRoutes.map((route) => ({
+                        destination: route.destination,
+                        subnetMask: route.subnetMask,
+                        nextHop: route.nextHop,
+                        outgoingInterface: route.outgoingInterface,
+                        administrativeDistance: route.administrativeDistance
                     }))
                 };
             }
@@ -256,6 +377,45 @@ export function buildConfiguredDevice(device: Device, data: DeviceConfiguration,
                 ospf.disable();
             }
             model.addProtocol(ospf);
+                } else if (protocol.type === ProtocolType.Dhcp) {
+            const dhcp = new DhcpProtocol(id);
+
+            if (protocol.dhcp !== undefined) {
+                dhcp.pools.push(
+                    ...protocol.dhcp.pools.map((pool) => ({
+                        ...pool,
+                        excludedAddresses: pool.excludedAddresses
+                            ? [...pool.excludedAddresses]
+                            : undefined
+                    }))
+                );
+            }
+
+            if (protocol.enabled) {
+                dhcp.enable();
+            } else {
+                dhcp.disable();
+            }
+
+            model.addProtocol(dhcp);
+        } else if (protocol.type === ProtocolType.StaticRoute) {
+            const staticRoutes = new StaticRouteProtocol(id);
+
+            if (protocol.staticRoutes !== undefined) {
+                staticRoutes.routes.push(
+                    ...protocol.staticRoutes.routes.map((route) => ({
+                        ...route
+                    }))
+                );
+            }
+
+            if (protocol.enabled) {
+                staticRoutes.enable();
+            } else {
+                staticRoutes.disable();
+            }
+
+            model.addProtocol(staticRoutes);
         } else {
             model.addProtocol(new NetworkProtocol({
                 id,
