@@ -5,7 +5,7 @@ Netzwerktopologien und zum Prüfen von Cisco-IOS-Konfigurationen. Geräte,
 Interfaces und unterstützte Protokolle können in einer gemeinsamen Oberfläche
 konfiguriert und lokal gespeichert werden.
 
-Das Projekt befindet sich in Entwicklung. Die aktuelle Version ist `0.0.1`.
+Das Projekt befindet sich in Entwicklung. Die aktuelle Version ist `0.0.3`.
 
 ## Funktionen
 
@@ -23,7 +23,7 @@ Das Projekt befindet sich in Entwicklung. Die aktuelle Version ist `0.0.1`.
   beim Trennen wieder deaktiviert.
 - **Validierung:** Pflichtfelder, Hostnamen, IP-Adressen, Subnetzmasken und
   Protokollkompatibilität prüfen und Fehler direkt an den Feldern anzeigen.
-- **Konfigurationsprüfung im Editor:** `.cfg`- und `.ios`-Dateien mit dem
+- **Konfigurationsprüfung im Editor:** `.cfg`-Dateien mit dem
   Cisco-IOS-Parser prüfen und Diagnosen unter „Probleme“ anzeigen.
 - **Lokale Speicherung:** Topologien und Gerätekonfigurationen erneut öffnen;
   Geräte- und Interface-IDs sowie Kabelzuordnungen erhalten.

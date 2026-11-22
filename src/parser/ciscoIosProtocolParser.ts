@@ -24,6 +24,7 @@ export class CiscoIosProtocolParser {
   private currentVlan: VlanConfiguration | undefined;
   private currentOspf: OspfProcessConfiguration | undefined;
   private currentRip = false;
+  private ripVersion: number | undefined;
   private blocked = false;
 
   public constructor(private readonly deviceType: DeviceType, deviceId: string) {
@@ -197,7 +198,19 @@ export class CiscoIosProtocolParser {
   }
 
   private parseRip(command: string, report: ReportDiagnostic): void {
-    if (command === "version 2" || command === "no auto-summary") {
+    const versionMatch = /^version\s+([12])$/.exec(command);
+
+    if (versionMatch) {
+      if (this.ripVersion !== undefined) {
+        report("error", "Die RIP-Version wurde bereits definiert.");
+        return;
+      }
+
+      this.ripVersion = Number(versionMatch[1]);
+      return;
+    }
+
+    if (command === "no auto-summary") {
       return;
     }
 
@@ -208,21 +221,30 @@ export class CiscoIosProtocolParser {
         address: match[1]
       };
 
-      if (!this.rip.networks.some(
+      if (this.rip.networks.some(
         (item) => item.address === network.address
       )) {
-        this.rip.networks.push(network);
+        report(
+          "error",
+          `Doppelte RIP-Netzwerkanweisung: ${network.address} wurde bereits definiert.`
+        );
+        return;
       }
 
+      this.rip.networks.push(network);
       return;
     }
 
     if (/^version(?:\s|$)/.test(command)) {
-      report("error", "RIP unterstützt hier nur: version 2.");
-    } else if (/^no\s+auto-summary$/.test(command)) {
-      return;
+      report(
+        "error",
+        "Ungültige RIP-Version. Erwartet: version 1 oder version 2."
+      );
     } else if (/^network(?:\s|$)/.test(command)) {
-      report("error", "Ungültiges RIP-Netzwerk. Erwartet: network <IPv4-Adresse>.");
+      report(
+        "error",
+        "Ungültiges RIP-Netzwerk. Erwartet: network <IPv4-Adresse>."
+      );
     } else {
       report("warning", `Nicht unterstützter RIP-Befehl: ${command}`);
     }
@@ -230,7 +252,16 @@ export class CiscoIosProtocolParser {
 
   private parseOspf(command: string, process: OspfProcessConfiguration, report: ReportDiagnostic): void {
     let match = /^router-id\s+(\S+)$/.exec(command);
+
     if (match && isIpv4(match[1])) {
+      if (process.routerId !== undefined) {
+        report(
+          "error",
+          "Die OSPF-Router-ID wurde bereits definiert."
+        );
+        return;
+      }
+
       process.routerId = match[1];
       return;
     }
@@ -238,9 +269,20 @@ export class CiscoIosProtocolParser {
     if (match && isIpv4(match[1]) && isWildcardMask(match[2]) && isArea(match[3])) {
       const area = normalizeArea(match[3]);
       const network = { address: match[1], wildcardMask: match[2], area };
-      if (!process.networks.some((item) => JSON.stringify(item) === JSON.stringify(network))) {
-        process.networks.push(network);
+      if (process.networks.some(
+        (item) =>
+          item.address === network.address &&
+          item.wildcardMask === network.wildcardMask &&
+          item.area === network.area
+      )) {
+        report(
+          "error",
+          `Doppelte OSPF-Netzwerkanweisung: ${network.address} ${network.wildcardMask} area ${network.area} wurde bereits definiert.`
+        );
+        return;
       }
+
+      process.networks.push(network);
       return;
     }
     match = /^(no\s+)?passive-interface\s+(\S+)$/.exec(command);
